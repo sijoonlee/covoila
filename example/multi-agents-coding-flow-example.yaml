@@ -1,0 +1,335 @@
+id: multi-agents-coding-flow-example
+name: "Multi-Agent Coding Workflow Example"
+
+agents:
+  planner:
+    cli: codex
+    model: gpt-5.4
+    reasoningEffort: medium
+    role: "write a concrete implementation plan."
+  plan-reviewer:
+    cli: codex
+    model: gpt-5.4
+    reasoningEffort: medium
+    role: "Reviews plan against the task"
+  coder:
+    cli: codex
+    model: gpt-5.4
+    reasoningEffort: medium
+    role: "Changes the working project according to the approved plan."
+  claim-analyzer:
+    cli: codex
+    model: gpt-5.4
+    reasoningEffort: medium
+    role: "Your job is to discover unknowns in the given task and to improve the task by retrieving knowledge from code and by discussing with user. \n\\nYou DO NOT write implementation code."
+  code-reviewer:
+    cli: codex
+    model: gpt-5.4
+    reasoningEffort: medium
+    role: "Review code based upon task and plan"
+
+limits:
+  maxConversationTurns: 8
+  maxInvalidReports: 3
+
+sharedContext: |
+  Working directory: {workDir}
+  Shared artifact directory: {taskTmpDir}
+  Canonical task file: {taskTmpDir}/task.md
+
+  Use the shared artifact directory for durable handoff files.
+  Do not rely on another agent terminal transcript as the source of truth.
+
+stateMachine:
+  initial: claim-analysis
+  states:
+    claim-analysis:
+      prompt: phase.claim-analysis
+      wait:
+        from: claim-analyzer
+        on:
+          - verb: done
+            requireArtifacts:
+              - claims.md
+            next: planning
+          - verb: failed
+            next: needs_user
+
+    planning:
+      prompt: phase.planning
+      wait:
+        from: planner
+        on:
+          - verb: done
+            requireArtifacts:
+              - plan.md
+            next: plan-reviewing
+          - verb: failed
+            next: needs_user
+
+    plan-reviewing:
+      prompt: phase.plan-reviewing
+      wait:
+        from: plan-reviewer
+        on:
+          - verb: done
+            next: coding
+          - verb: talk
+            target: planner
+            prompt: revision.revision-plan-from-plan-reviewing
+            increment: revision_revision-plan-from-plan-reviewing
+            max: 3
+            exceeded: needs_user
+            next: revision-revision-plan-from-plan-reviewing
+          - verb: failed
+            next: needs_user
+
+    coding:
+      prompt: phase.coding
+      wait:
+        from: coder
+        on:
+          - verb: done
+            next: code-reviewing
+          - verb: talk
+            target: planner
+            prompt: revision.revision-plan-from-coding
+            increment: revision_revision-plan-from-coding
+            max: 3
+            exceeded: needs_user
+            next: revision-revision-plan-from-coding
+          - verb: failed
+            next: needs_user
+
+    code-reviewing:
+      prompt: phase.code-reviewing
+      wait:
+        from: code-reviewer
+        on:
+          - verb: done
+            next: done
+          - verb: talk
+            target: coder
+            prompt: revision.revision-code-from-code-review
+            increment: revision_revision-code-from-code-review
+            max: 3
+            exceeded: needs_user
+            next: revision-revision-code-from-code-review
+          - verb: failed
+            next: needs_user
+
+    revision-revision-plan-from-plan-reviewing:
+      wait:
+        from: planner
+        on:
+          - verb: done
+            requireArtifacts:
+              - plan.md
+            next: plan-reviewing
+          - verb: failed
+            next: needs_user
+
+    revision-revision-plan-from-coding:
+      wait:
+        from: planner
+        on:
+          - verb: done
+            requireArtifacts:
+              - plan.md
+            next: coding
+          - verb: failed
+            next: needs_user
+
+    revision-revision-code-from-code-review:
+      wait:
+        from: coder
+        on:
+          - verb: done
+            next: code-reviewing
+          - verb: failed
+            next: needs_user
+
+    done:
+      final: true
+      status: done
+
+    needs_user:
+      final: true
+      status: needs_user
+
+prompts:
+  phase.claim-analysis: |
+    You are responsible for the Claim analysis phase.
+    
+    {sharedContext}
+    
+    Analyze task and discover and verify underlying claims
+    
+    Phase prompt:
+    Steps 
+    1. understand the task
+    2. extract foundational claims the implementation depends on
+    3. convert claims into evidence questions
+    4. retrieve only what is needed to answer those questions
+    5. when claim can not be verified from retrieval, discuss with user to decide how to approach the unverified.
+    6. Write claims.md file based upon the retrieval and/or the discussion with user.
+      - For each claim, provide code evidence (file name and line number) and/or the discussion with user when applicable
+    
+    Core principle:
+    1. Do not guess. Do not retrieve blindly.
+    2. Claims define what must be true. Evidence questions define what must be retrieved.
+    3. Retrieval and discussion exist to answer evidence questions.
+    
+    Input artifacts:
+    - task.md
+    
+    Output artifacts:
+    - claims.md
+    
+    Allowed reports:
+    - { "verb": "done", "artifacts": ["claims.md"] }
+    - { "verb": "failed", "reason": "..." }
+
+  phase.planning: |
+    You are responsible for the planning phase.
+    
+    {sharedContext}
+    
+    Create the implementation plan from task.md and claims.md
+    
+    Phase prompt:
+    Read task.md and claims.md, then write a concrete implementation plan.
+    
+    You may need to revise your plan on request.
+    
+    Goal is to have ordered executable work units, each with acceptance criteria.
+    
+    Requirements:
+    1. Work units should be independently understandable.
+    2. Prefer small concrete units.
+    3. Make relevant information traceable - Attach the reference of task.md file or claims.md file to each step whenever applicable
+    
+    Input artifacts:
+    - task.md,claims.md
+    
+    Output artifacts:
+    - plan.md
+    
+    Allowed reports:
+    - { "verb": "done", "artifacts": ["plan.md"] }
+    - { "verb": "failed", "reason": "..." }
+
+  phase.plan-reviewing: |
+    You are responsible for the Plan Reviewing phase.
+    
+    {sharedContext}
+    
+    Review the plan before coding starts.
+    
+    Phase prompt:
+    Review plan.md against task.md and claims.md. Approve it or explain what needs revision.
+    
+    Input artifacts:
+    - task.md,claims.md,plan.md
+    
+    Output artifacts:
+    - none
+    
+    Allowed reports:
+    - { "verb": "done" }
+    - { "verb": "talk", "target": "planner", "content": "Explain the needed planning revision." }
+    - { "verb": "failed", "reason": "..." }
+
+  phase.coding: |
+    You are responsible for the Coding phase.
+    
+    {sharedContext}
+    
+    Implement the approved plan in the working directory.
+    
+    Phase prompt:
+    Read plan.md. Read task.md and/or claims.md when you need clarification. Then implement the requested changes.
+    
+    Input artifacts:
+    - task.md,plan.md,claims.md
+    
+    Output artifacts:
+    - none
+    
+    Allowed reports:
+    - { "verb": "done" }
+    - { "verb": "talk", "target": "planner", "content": "Explain the needed planning revision." }
+    - { "verb": "failed", "reason": "..." }
+
+  phase.code-reviewing: |
+    You are responsible for the Code Reviewing phase.
+    
+    {sharedContext}
+    
+    Review the code changes against the task and plan.
+    
+    Phase prompt:
+    Review the working tree against plan.md. If you need clarification, read task.md and/or claims.md. Approve it or explain what needs to be improved.
+    
+    Input artifacts:
+    - task.md,claims.md,plan.md
+    
+    Output artifacts:
+    - none
+    
+    Allowed reports:
+    - { "verb": "done" }
+    - { "verb": "talk", "target": "coder", "content": "Explain the needed Coding revision." }
+    - { "verb": "failed", "reason": "..." }
+
+  revision.revision-plan-from-plan-reviewing: |
+    You are revising the planning phase because Plan Reviewing requested changes.
+    
+    {sharedContext}
+    
+    Revision request:
+    {lastReport.content}
+    
+    Revise the plan based on the request, then report done.
+    
+    Revise these output artifacts as needed:
+    - plan.md
+    
+    When revision is complete, report:
+    - { "verb": "done" }
+    - { "verb": "failed", "reason": "..." }
+
+  revision.revision-plan-from-coding: |
+    You are revising the planning phase because Coding requested changes.
+    
+    {sharedContext}
+    
+    Revision request:
+    {lastReport.content}
+    
+    Revise the plan based on the request, then report done.
+    
+    Revise these output artifacts as needed:
+    - plan.md
+    
+    When revision is complete, report:
+    - { "verb": "done" }
+    - { "verb": "failed", "reason": "..." }
+
+  revision.revision-code-from-code-review: |
+    You are revising the Coding phase because Code Reviewing requested changes.
+    
+    {sharedContext}
+    
+    Revision request:
+    {lastReport.content}
+    
+    Improve code based upon request then report done.
+    
+    Revise these output artifacts as needed:
+    - none
+    
+    When revision is complete, report:
+    - { "verb": "done" }
+    - { "verb": "failed", "reason": "..." }
+

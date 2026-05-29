@@ -1,0 +1,41 @@
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+:root {
+  --bg: #0d0d0d;
+  --bg-panel: #111111;
+  --bg-terminal: #080808;
+  --bg-hover: #1a1a1a;
+  --border: #1e1e1e;
+  --border-bright: #2e2e2e;
+  --text: #cccccc;
+  --text-dim: #555555;
+  --text-bright: #eeeeee;
+  --amber: #f0a500;
+  --amber-dim: #5a3d00;
+  --green: #3dba3d;
+  --red: #e04040;
+  --font-mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'Courier New', monospace;
+  --header-height: 44px;
+}
+
+html, body, #root {
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  overflow: hidden;
+}
+
+button {
+  cursor: pointer;
+  font-family: inherit;
+  font-size: inherit;
+  background: none;
+  border: none;
+  padding: 0;
+}

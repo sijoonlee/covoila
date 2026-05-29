@@ -1,0 +1,154 @@
+.panel {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-terminal);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+  min-height: 0;
+  min-width: 0;
+}
+
+.spanRows {
+  grid-row: 1 / -1;
+}
+
+.spanCols {
+  grid-column: 1 / -1;
+}
+
+.hiddenPanel {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  opacity: 0;
+  pointer-events: none;
+  visibility: hidden;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.title {
+  font-size: 11px;
+}
+
+.agentId {
+  color: var(--amber);
+}
+
+.dot {
+  color: var(--text-dim);
+}
+
+.taskTitle {
+  color: var(--text);
+}
+
+.controls {
+  display: flex;
+  gap: 2px;
+}
+
+.configBar {
+  display: grid;
+  grid-template-columns: minmax(72px, 0.75fr) minmax(120px, 1.4fr) minmax(72px, 0.8fr);
+  gap: 6px;
+  padding: 6px 10px;
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.configSelect {
+  min-width: 0;
+  height: 24px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+
+.cwdInput {
+  grid-column: 1 / -1;
+  min-width: 0;
+  height: 24px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  padding: 0 6px;
+}
+
+.configSelect:focus,
+.cwdInput:focus {
+  outline: none;
+  border-color: var(--amber);
+}
+
+.ctrlBtn {
+  color: var(--text-dim);
+  font-size: 11px;
+  padding: 2px 5px;
+  border-radius: 2px;
+  transition: color 0.1s, background 0.1s;
+}
+
+.ctrlBtn:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+
+.startCtrlBtn {
+  color: var(--green);
+  font-size: 11px;
+  padding: 2px 8px;
+  border: 1px solid var(--border-bright);
+  border-radius: 2px;
+}
+
+.startCtrlBtn:hover:not(:disabled) {
+  color: var(--text-bright);
+  border-color: var(--green);
+}
+
+.startCtrlBtn:disabled {
+  color: var(--text-dim);
+  cursor: default;
+}
+
+.sessionStatus {
+  color: var(--text-dim);
+}
+
+.errorStrip {
+  color: var(--red);
+  font-size: 11px;
+  padding: 5px 10px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(224, 64, 64, 0.08);
+}
+
+.xtermBody {
+  flex: 1;
+  min-height: 0;
+  padding: 8px;
+  overflow: hidden;
+}
+
+.xtermBody :global(.xterm) {
+  height: 100%;
+}
+
+.xtermBody :global(.xterm-viewport) {
+  background: transparent !important;
+}

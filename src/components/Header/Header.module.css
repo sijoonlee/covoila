@@ -1,0 +1,77 @@
+.header {
+  height: var(--header-height);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border-bright);
+  flex-shrink: 0;
+  position: relative;
+  z-index: 100;
+}
+
+.left {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  position: relative;
+  z-index: 100;
+}
+
+.right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  position: relative;
+  z-index: 100;
+}
+
+.brand {
+  color: var(--amber);
+  font-size: 12px;
+  font-weight: bold;
+  letter-spacing: 0.12em;
+}
+
+.nav {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.navBtn {
+  color: var(--text-dim);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  padding: 4px 10px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  transition: color 0.1s, border-color 0.1s;
+}
+
+.navBtn:hover,
+.navBtn.active {
+  color: var(--amber);
+  border-color: var(--amber-dim);
+}
+
+.layoutPickerWrapper {
+  position: relative;
+}
+
+.iconBtn {
+  color: var(--text-dim);
+  font-size: 16px;
+  padding: 4px 8px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  line-height: 1;
+  transition: color 0.1s, border-color 0.1s;
+}
+
+.iconBtn:hover,
+.iconBtn.active {
+  color: var(--amber);
+  border-color: var(--amber-dim);
+}

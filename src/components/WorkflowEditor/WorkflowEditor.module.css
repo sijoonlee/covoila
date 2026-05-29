@@ -1,0 +1,374 @@
+.editor {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+}
+
+.header {
+  min-height: 58px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.title {
+  color: var(--text-bright);
+  font-size: 14px;
+}
+
+.meta,
+.sectionMeta {
+  margin-top: 3px;
+  color: var(--text-dim);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.lockBtn,
+.resetBtn,
+.saveBtn,
+.addBtn,
+.deleteBtn,
+.phaseControls button,
+.revisionActions button {
+  min-height: 26px;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--text);
+  font-size: 11px;
+}
+
+.lockBtn {
+  color: var(--amber);
+  border-color: var(--amber-dim);
+}
+
+.saveBtn {
+  color: var(--green);
+  border-color: rgba(61, 186, 61, 0.45);
+}
+
+.resetBtn {
+  color: var(--text-dim);
+}
+
+.lockBtn:disabled,
+.resetBtn:disabled,
+.saveBtn:disabled,
+.addBtn:disabled,
+.deleteBtn:disabled,
+.phaseControls button:disabled,
+.revisionActions button:disabled {
+  color: var(--text-dim);
+  border-color: var(--border);
+  cursor: default;
+  opacity: 0.55;
+}
+
+.saveStrip {
+  flex-shrink: 0;
+  padding: 7px 14px;
+  border-bottom: 1px solid var(--border);
+  color: var(--green);
+  font-size: 11px;
+}
+
+.saveError {
+  color: var(--red);
+}
+
+.stageRail {
+  display: flex;
+  gap: 8px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-dim);
+  font-size: 10px;
+}
+
+.stageActive,
+.stageNext,
+.stageDisabled {
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+}
+
+.stageActive {
+  color: var(--green);
+}
+
+.stageNext {
+  color: var(--amber);
+  border-color: var(--amber-dim);
+}
+
+.content {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 14px;
+}
+
+.section {
+  margin-bottom: 18px;
+}
+
+.sectionHeader {
+  min-height: 34px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 10px;
+}
+
+.sectionTitle {
+  color: var(--text-bright);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+}
+
+.cardGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 10px;
+}
+
+.workflowFields {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.65fr) minmax(280px, 1fr);
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-panel);
+}
+
+.loadMenu {
+  display: grid;
+  grid-template-columns: minmax(280px, 1fr) auto;
+  align-items: end;
+  gap: 10px;
+  flex-shrink: 0;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-panel);
+}
+
+.loadMenu .field {
+  margin-bottom: 0;
+}
+
+.card,
+.phaseCard,
+.revisionSection {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-panel);
+}
+
+.card {
+  padding: 10px;
+}
+
+.cardHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 9px;
+}
+
+.idInput {
+  color: var(--amber);
+  font-weight: 700;
+}
+
+.inlineFields,
+.phaseGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.phaseGrid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.field span {
+  color: var(--text-dim);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+}
+
+.field input,
+.field select,
+.field textarea,
+.idInput {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--border-bright);
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  padding: 6px 7px;
+}
+
+.field textarea {
+  min-height: 68px;
+  resize: vertical;
+  line-height: 1.45;
+}
+
+.field input:disabled,
+.field select:disabled,
+.idInput:disabled {
+  color: var(--text-dim);
+  border-color: var(--border);
+  cursor: default;
+}
+
+.field input:focus,
+.field select:focus,
+.field textarea:focus,
+.idInput:focus {
+  outline: none;
+  border-color: var(--amber);
+}
+
+.phaseList {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.artifactNotice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-panel);
+  color: var(--text-dim);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.artifactNotice strong {
+  color: var(--amber);
+  font-weight: 700;
+}
+
+.phaseCard {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr);
+  min-height: 120px;
+}
+
+.phaseOrder {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 14px;
+  border-right: 1px solid var(--border);
+  color: var(--amber);
+  font-size: 13px;
+}
+
+.phaseBody {
+  min-width: 0;
+  padding: 10px;
+}
+
+.phaseControls {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.revisionActions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.revisionList {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px;
+}
+
+.revisionCard {
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-terminal);
+}
+
+.revisionGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.emptyPolicy {
+  padding: 10px;
+  border: 1px dashed var(--border);
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
+.lockPreview {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px;
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
+.lockPreview span {
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+}
+
+@media (max-width: 760px) {
+  .header,
+  .sectionHeader {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .artifactNotice {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .inlineFields,
+  .workflowFields,
+  .loadMenu,
+  .phaseGrid,
+  .revisionGrid {
+    grid-template-columns: 1fr;
+  }
+}

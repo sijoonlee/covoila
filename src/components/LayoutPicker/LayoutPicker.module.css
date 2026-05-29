@@ -1,0 +1,42 @@
+.picker {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-bright);
+  border-radius: 4px;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.7);
+  z-index: 100;
+}
+
+.option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text-dim);
+  padding: 6px 10px 6px 6px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  text-align: left;
+  transition: color 0.1s, border-color 0.1s, background 0.1s;
+}
+
+.option:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+
+.option.active {
+  color: var(--amber);
+  border-color: var(--amber-dim);
+}
+
+.label {
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+}
