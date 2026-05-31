@@ -2,7 +2,7 @@ export type TaskStatus = 'RUNNING' | 'BLOCKED' | 'READY' | 'DONE' | 'FAILED' | '
 
 export type AppView = 'tasks' | 'workflow';
 
-export type Layout = 'single' | '2col' | '2row' | '2x2' | 'main+2' | 'top+2' | '3col';
+export type Layout = 'single' | '2col' | '2row' | '2x2';
 
 export type LayoutMeta = {
   id: Layout;
@@ -205,13 +205,15 @@ export type Schema = {
 
 export type AgentSessionState = {
   status: 'idle' | 'running' | 'done';
+  needsHumanAttention?: boolean;
+  humanAttentionAt?: string;
 };
 
 export type TaskRecord = {
   id: string;
   name: string;
   workDir: string;             // user's project dir, resolves {work-dir}
-  taskTmpDir: string;          // auto-generated temp dir, resolves {task-tmp-dir}
+  taskTmpDir: string;          // auto-generated artifact dir for workflow handoffs
   status: TaskStatus;
   createdAt: string;           // ISO timestamp
   workflowSnapshot: WorkflowDefinition;  // deep copy at creation time

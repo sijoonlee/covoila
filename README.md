@@ -5,7 +5,7 @@ Covoila is a local multi-agent coding workspace. It provides a React UI for star
 The app is designed around two main views:
 
 - **Tasks**: create a coding task, launch the selected workflow, and watch live agent terminals in configurable layouts.
-- **Workflow Editor**: define agent roles, phase order, revision rules, and save workflows as YAML files under `.covoila/workflows`.
+- **Workflow Editor**: define agent roles, phase order, revision rules, and save workflows as YAML files under `workflows/`.
 
 ## Features
 
@@ -15,7 +15,7 @@ The app is designed around two main views:
 - Task orchestration through deterministic YAML workflows.
 - Agent-to-orchestrator reporting through an MCP `report` tool.
 - WebSocket updates for terminal output, task changes, and session status.
-- Local persistence in `.covoila`, including workflow files, agent config, task database, and task artifacts.
+- Local persistence in `.covoila` for runtime data, with workflow YAML files kept in top-level `workflows/` so they can be committed.
 
 ## Requirements
 
@@ -68,14 +68,14 @@ pnpm run preview
 
 When you create a task, Covoila:
 
-1. Loads the selected workflow YAML from `.covoila/workflows`.
+1. Loads the selected workflow YAML from `workflows/`.
 2. Creates a task record in `.covoila/covoila.db`.
 3. Writes the task prompt to the task artifact directory.
 4. Starts the first workflow agent as a CLI session.
 5. Injects an MCP report server configuration so the agent can call `report`.
 6. Advances the workflow when agents submit structured reports such as `done`, `talk`, `broadcast`, or `failed`.
 
-Agent sessions run in the task working directory. Workflow artifacts are stored below:
+Agent sessions run in the selected task working directory. Workflow artifacts are stored under this Covoila project, and each spawned agent is granted access to its task-specific artifact directory:
 
 ```text
 .covoila/tmp/<task-name>-<timestamp>-<id>/
@@ -83,19 +83,22 @@ Agent sessions run in the task working directory. Workflow artifacts are stored 
 
 ## Local Data
 
-Covoila stores runtime data in the project-local `.covoila` directory:
+Covoila stores app runtime data in this app's project-local `.covoila` directory:
 
 ```text
 .covoila/
   agentConfigs.json
   covoila.db
-  workflows/
-    *.yaml
   tmp/
     <task artifacts>
 ```
 
-This directory is ignored by git and is intended to remain local.
+This directory is ignored by git and is intended to remain local. Workflow definitions live outside it:
+
+```text
+workflows/
+  *.yaml
+```
 
 ## Project Structure
 
@@ -143,7 +146,7 @@ docs/
 
 ## Workflow Files
 
-Workflow YAML files live in `.covoila/workflows`. The current workflow format includes:
+Workflow YAML files live in `workflows/`. The current workflow format includes:
 
 - `id` and `name`
 - `agents` with CLI, model, reasoning effort, and role

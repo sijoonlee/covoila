@@ -26,18 +26,3 @@
   grid-template-columns: 1fr 1fr;
   grid-template-rows: 1fr 1fr;
 }
-
-.layoutMainPlus2 {
-  grid-template-columns: 3fr 2fr;
-  grid-template-rows: 1fr 1fr;
-}
-
-.layoutTop2 {
-  grid-template-columns: 1fr 1fr;
-  grid-template-rows: 1fr 1fr;
-}
-
-.layout3col {
-  grid-template-columns: 1fr 1fr 1fr;
-  grid-template-rows: 1fr;
-}

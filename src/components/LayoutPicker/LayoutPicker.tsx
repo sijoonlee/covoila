@@ -67,39 +67,6 @@ function LayoutIcon({ layout }: { layout: Layout }) {
         </svg>
       )
     }
-    case 'main+2': {
-      const mainW = Math.round(inner * 0.6)
-      const sideW = inner - mainW - gap
-      const sideH = (inner - gap) / 2
-      return (
-        <svg width={sz} height={sz} viewBox={`0 0 ${sz} ${sz}`}>
-          <rect x={pad} y={pad} width={mainW} height={inner} fill="currentColor" opacity={0.5} rx={1} />
-          <rect x={pad + mainW + gap} y={pad} width={sideW} height={sideH} fill="currentColor" opacity={0.5} rx={1} />
-          <rect x={pad + mainW + gap} y={pad + sideH + gap} width={sideW} height={sideH} fill="currentColor" opacity={0.5} rx={1} />
-        </svg>
-      )
-    }
-    case 'top+2': {
-      const halfH = (inner - gap) / 2
-      const halfW = (inner - gap) / 2
-      return (
-        <svg width={sz} height={sz} viewBox={`0 0 ${sz} ${sz}`}>
-          <rect x={pad} y={pad} width={inner} height={halfH} fill="currentColor" opacity={0.5} rx={1} />
-          <rect x={pad} y={pad + halfH + gap} width={halfW} height={halfH} fill="currentColor" opacity={0.5} rx={1} />
-          <rect x={pad + halfW + gap} y={pad + halfH + gap} width={halfW} height={halfH} fill="currentColor" opacity={0.5} rx={1} />
-        </svg>
-      )
-    }
-    case '3col': {
-      const w = (inner - gap * 2) / 3
-      return (
-        <svg width={sz} height={sz} viewBox={`0 0 ${sz} ${sz}`}>
-          <rect x={pad} y={pad} width={w} height={inner} fill="currentColor" opacity={0.5} rx={1} />
-          <rect x={pad + w + gap} y={pad} width={w} height={inner} fill="currentColor" opacity={0.5} rx={1} />
-          <rect x={pad + w * 2 + gap * 2} y={pad} width={w} height={inner} fill="currentColor" opacity={0.5} rx={1} />
-        </svg>
-      )
-    }
     default:
       return null
   }

@@ -244,6 +244,7 @@ function generateWorkflowYaml(
     '',
     '  Use the shared artifact directory for durable handoff files.',
     '  Do not rely on another agent terminal transcript as the source of truth.',
+    '  If you need human input, report { "verb": "talk", "target": "HUMAN", "content": "Your question or blocker." }.',
     '',
     'stateMachine:',
     `  initial: ${yamlScalar(phases[0]?.id ?? 'done')}`,
@@ -379,6 +380,7 @@ function renderPrompt(
     'Allowed reports:',
     `- ${doneReport}`,
     ...revisionReports,
+    '- { "verb": "talk", "target": "HUMAN", "content": "Ask the user for the needed decision or missing information." }',
     '- { "verb": "failed", "reason": "..." }',
   ].join('\n')
 }
@@ -405,6 +407,7 @@ function renderRevisionPrompt(rule: RevisionRuleDraft, phases: WorkflowPhaseDraf
     '',
     'When revision is complete, report:',
     '- { "verb": "done" }',
+    '- { "verb": "talk", "target": "HUMAN", "content": "Ask the user for the needed decision or missing information." }',
     '- { "verb": "failed", "reason": "..." }',
   ].join('\n')
 }
@@ -722,7 +725,7 @@ export default function WorkflowEditor() {
       await api.workflow.save(yaml, filename)
       await refreshWorkflowFiles()
       setSelectedWorkflowFilename(filename)
-      setSaveStatus(`Saved .covoila/workflows/${filename}`)
+      setSaveStatus(`Saved workflows/${filename}`)
     } catch (error) {
       setSaveError(error instanceof Error ? error.message : 'Failed to save workflow')
     } finally {

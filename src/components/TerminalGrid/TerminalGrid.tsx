@@ -9,9 +9,6 @@ const LAYOUT_CLASS: Record<Layout, string> = {
   '2col':   styles.layout2col,
   '2row':   styles.layout2row,
   '2x2':    styles.layout2x2,
-  'main+2': styles.layoutMainPlus2,
-  'top+2':  styles.layoutTop2,
-  '3col':   styles.layout3col,
 }
 
 type Props = {
@@ -19,7 +16,10 @@ type Props = {
   agentConfigs: AgentConfig[]
   sessions?: AgentSessionSnapshot[]
   activeTaskId?: string | null
+  activeScreenIndex?: number
+  attentionSessionIds?: Set<string>
   title?: string
+  onHumanAttentionCleared?: (sessionId: string) => void
   onSessionStarted?: (session: AgentSessionSnapshot) => void
   onSessionTerminated?: (sessionId: string) => void
 }
@@ -29,7 +29,10 @@ export default function TerminalGrid({
   agentConfigs,
   sessions = [],
   activeTaskId = null,
+  activeScreenIndex = 0,
+  attentionSessionIds = new Set(),
   title = 'Playground',
+  onHumanAttentionCleared,
   onSessionStarted,
   onSessionTerminated,
 }: Props) {
@@ -37,10 +40,15 @@ export default function TerminalGrid({
   const slotCount = LAYOUT_SLOTS[layout]
   const taskSessions = sessions.filter(session => session.taskId)
   const activeTaskSessions = activeTaskId
-    ? taskSessions.filter(session => session.taskId === activeTaskId)
+    ? taskSessions
+      .filter(session => session.taskId === activeTaskId)
+      .slice()
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
     : []
+  const screenStart = activeScreenIndex * slotCount
+  const visibleTaskSessions = activeTaskSessions.slice(screenStart, screenStart + slotCount)
   const activeTaskSessionKey = activeTaskSessions.map(session => session.id).join('|')
-  const visibleTaskSlotById = new Map(activeTaskSessions.map((session, index) => [session.id, index]))
+  const visibleTaskSlotById = new Map(visibleTaskSessions.map((session, index) => [session.id, index]))
   const taskSlotById = new Map<string, number>()
   const nextSlotByTaskId = new Map<string, number>()
   for (const session of taskSessions) {
@@ -74,8 +82,7 @@ export default function TerminalGrid({
             slotIndex={slot}
             title={`${title} CLI ${slot + 1}`}
             hidden={hidden}
-            spanRows={!hidden && slot === 0 && layout === 'main+2'}
-            spanCols={!hidden && slot === 0 && layout === 'top+2'}
+            needsHumanAttention={false}
             onSessionStarted={onSessionStarted}
             onSessionTerminated={onSessionTerminated}
           />
@@ -84,7 +91,7 @@ export default function TerminalGrid({
       {taskSessions.filter(session => mountedTaskSessionIds.has(session.id)).map((session) => {
         const visibleSlot = visibleTaskSlotById.get(session.id) ?? -1
         const stableSlot = taskSlotById.get(session.id) ?? 0
-        const hidden = activeTaskId === null || session.taskId !== activeTaskId || visibleSlot >= slotCount
+        const hidden = activeTaskId === null || session.taskId !== activeTaskId || visibleSlot < 0
         return (
           <AgentTerminalPanel
             key={session.id}
@@ -94,8 +101,8 @@ export default function TerminalGrid({
             title={session.title}
             emptyMessage="Waiting for agent output."
             hidden={hidden}
-            spanRows={!hidden && visibleSlot === 0 && layout === 'main+2'}
-            spanCols={!hidden && visibleSlot === 0 && layout === 'top+2'}
+            needsHumanAttention={attentionSessionIds.has(session.id)}
+            onHumanAttentionCleared={onHumanAttentionCleared}
             onSessionStarted={onSessionStarted}
             onSessionTerminated={onSessionTerminated}
           />

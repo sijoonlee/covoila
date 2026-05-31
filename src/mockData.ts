@@ -10,7 +10,10 @@ import type {
 export const mockTasks: TaskRecord[] = [];
 
 export const LAYOUT_SLOTS: Record<Layout, number> = {
-  single: 1, '2col': 2, '2row': 2, '2x2': 4, 'main+2': 3, 'top+2': 3, '3col': 3,
+  single: 1,
+  '2col': 2,
+  '2row': 2,
+  '2x2': 4,
 };
 
 export const mockAgentConfigs: AgentConfig[] = [
@@ -29,10 +32,7 @@ export const REASONING_EFFORTS: ReasoningEffort[] = ['low', 'medium', 'high', 'x
 
 export const layoutOptions: LayoutMeta[] = [
   { id: 'single', label: '1 Terminal' },
-  { id: '2col',   label: '2 Columns' },
-  { id: '2row',   label: '2 Rows' },
+  { id: '2col',   label: '2 x 1' },
+  { id: '2row',   label: '1 x 2' },
   { id: '2x2',    label: '2 x 2' },
-  { id: 'main+2', label: 'Main + 2' },
-  { id: 'top+2',  label: 'Top + 2' },
-  { id: '3col',   label: '3 Columns' },
 ];

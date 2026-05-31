@@ -37,8 +37,10 @@ type Props = {
   taskId?: string
   emptyMessage?: string
   hidden?: boolean
+  needsHumanAttention?: boolean
   spanRows?: boolean
   spanCols?: boolean
+  onHumanAttentionCleared?: (sessionId: string) => void
   onSessionStarted?: (session: AgentSessionSnapshot) => void
   onSessionTerminated?: (sessionId: string) => void
 }
@@ -78,12 +80,14 @@ export default function AgentTerminalPanel({
   taskId,
   emptyMessage,
   hidden = false,
+  needsHumanAttention = false,
   spanRows,
   spanCols,
+  onHumanAttentionCleared,
   onSessionStarted,
   onSessionTerminated,
 }: Props) {
-  const extra = `${spanRows ? styles.spanRows : spanCols ? styles.spanCols : ''} ${hidden ? styles.hiddenPanel : ''}`
+  const extra = `${spanRows ? styles.spanRows : spanCols ? styles.spanCols : ''} ${hidden ? styles.hiddenPanel : ''} ${needsHumanAttention ? styles.needsHumanAttention : ''}`
   const containerRef = useRef<HTMLDivElement | null>(null)
   const terminalRef = useRef<Terminal | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
@@ -92,6 +96,8 @@ export default function AgentTerminalPanel({
   const attachedSessionIdsRef = useRef<Set<string>>(new Set())
   const hydratedSessionIdsRef = useRef<Set<string>>(new Set())
   const hiddenRef = useRef(hidden)
+  const needsHumanAttentionRef = useRef(needsHumanAttention)
+  const onHumanAttentionClearedRef = useRef(onHumanAttentionCleared)
   const [session, setSession] = useState<AgentSessionSnapshot | null>(existingSession ?? null)
   const [starting, setStarting] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -175,6 +181,11 @@ export default function AgentTerminalPanel({
   }, [hidden])
 
   useEffect(() => {
+    needsHumanAttentionRef.current = needsHumanAttention
+    onHumanAttentionClearedRef.current = onHumanAttentionCleared
+  }, [needsHumanAttention, onHumanAttentionCleared])
+
+  useEffect(() => {
     if (!containerRef.current || terminalRef.current) return
 
     const terminal = new Terminal({
@@ -194,6 +205,10 @@ export default function AgentTerminalPanel({
     fitAddonRef.current = fitAddon
 
     terminal.onData((data) => {
+      const sessionId = sessionIdRef.current
+      if (sessionId && needsHumanAttentionRef.current) {
+        onHumanAttentionClearedRef.current?.(sessionId)
+      }
       sendTerminalMessage({ type: 'input', data })
     })
     terminal.onResize(({ cols, rows }) => {

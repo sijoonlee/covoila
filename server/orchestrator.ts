@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto'
+import fs from 'node:fs/promises'
+import path from 'node:path'
 import { appendTaskEvent, createTask, getTask, updateTask } from './db.js'
 import type { AgentSessionManager, AgentSessionConfig, AgentSessionSnapshot } from './agent.js'
 import {
@@ -11,6 +13,7 @@ import {
   applyWorkflowReport,
   createWorkflowRun,
   getCurrentPromptDispatch,
+  resolveTaskTmpDir,
   writeTaskFile,
   type AgentReport,
   type PromptDispatch,
@@ -18,6 +21,7 @@ import {
   type WorkflowTaskContext,
 } from './workflowRuntime.js'
 import type { WorkflowDefinition } from './workflowParser.js'
+import { CONFIG_DIR } from './storage.js'
 import type { TaskRecord } from '../src/types.js'
 
 type OrchestratorInput = {
@@ -53,9 +57,14 @@ export class Orchestrator {
   async startRun(input: StartRunInput): Promise<OrchestratorStartResult> {
     const workflow = this.workflow
     const taskId = `task_${randomToken()}`
-    const taskTmpDir = `.covoila/tmp/${slugify(input.name || 'task')}-${new Date().toISOString().replace(/[-:]/g, '').slice(0, 15)}-${randomToken(5)}`
+    const workDir = await resolveWorkDir(input.workDir)
+    const taskTmpDir = path.join(
+      CONFIG_DIR,
+      'tmp',
+      `${slugify(input.name || 'task')}-${new Date().toISOString().replace(/[-:]/g, '').slice(0, 15)}-${randomToken(5)}`,
+    )
     const context: WorkflowTaskContext = {
-      workDir: input.workDir,
+      workDir,
       taskTmpDir,
     }
 
@@ -81,7 +90,13 @@ export class Orchestrator {
     })
 
     const dispatch = getCurrentPromptDispatch(workflow, run, context)
-    const dispatched = dispatch ? await this.dispatchPrompt(task, run, dispatch, workflow) : null
+    let dispatched: { session: AgentSessionSnapshot; run: WorkflowRunState } | null = null
+    try {
+      dispatched = dispatch ? await this.dispatchPrompt(task, run, dispatch, workflow) : null
+    } catch (error) {
+      await markTaskDispatchFailed(task.id, run, error)
+      throw error
+    }
     const updatedTask = await getTask(taskId)
     const updatedRun = updatedTask ? readRun(updatedTask) ?? run : run
 
@@ -126,12 +141,21 @@ export class Orchestrator {
 
     const report = parseAgentReport(event.output)
     const result = await applyWorkflowReport(workflow, run, context, fromAgent, report)
+    const needsHumanAttention = report.verb === 'talk' && report.target === 'HUMAN'
     const nextTask = await updateTask(task.id, current => ({
       ...current,
       status: taskStatusForRun(result.run),
       memory: {
         ...current.memory,
         orchestratorRun: result.run,
+      },
+      agentSessions: {
+        ...current.agentSessions,
+        [fromAgent]: {
+          ...(current.agentSessions[fromAgent] ?? { status: 'running' as const }),
+          needsHumanAttention,
+          humanAttentionAt: needsHumanAttention ? event.receivedAt : current.agentSessions[fromAgent]?.humanAttentionAt,
+        },
       },
     }))
 
@@ -207,12 +231,16 @@ export class Orchestrator {
       agentInstanceId: dispatch.agent,
       title: `${task.name}: ${dispatch.state}`,
       cwd: task.workDir,
+      extraWritableDirs: [resolveTaskTmpDir(contextFromTask(task))],
       config,
       prompt: dispatch.prompt,
       mcpUrl: this.mcpUrl,
       reportToken: rawToken,
       reportTokenEnvVar: tokenEnvVar,
     })
+    if (session.status === 'failed') {
+      throw new Error(`Agent session failed to start: ${session.transcript.join('').trim() || session.id}`)
+    }
 
     const nextRun: WorkflowRunState = {
       ...run,
@@ -241,6 +269,60 @@ export class Orchestrator {
       reasoningEffort: workflowAgent.reasoningEffort,
     }
   }
+}
+
+async function markTaskDispatchFailed(
+  taskId: string,
+  run: WorkflowRunState,
+  error: unknown,
+): Promise<void> {
+  const message = error instanceof Error ? error.message : 'Failed to dispatch workflow prompt'
+  const failedRun: WorkflowRunState = {
+    ...run,
+    status: 'failed',
+  }
+  await updateTask(taskId, current => ({
+    ...current,
+    status: 'FAILED',
+    memory: {
+      ...current.memory,
+      orchestratorRun: failedRun,
+    },
+  }))
+  await appendTaskEvent({
+    taskId,
+    type: 'ORCHESTRATOR_DISPATCH_FAILED',
+    payload: { error: message },
+  })
+}
+
+async function resolveWorkDir(raw: string): Promise<string> {
+  const normalized = stripWrappingQuotes(raw.trim())
+  if (!normalized) {
+    throw new Error('Missing working directory')
+  }
+  const absolute = path.resolve(normalized)
+  let stat
+  try {
+    stat = await fs.stat(absolute)
+  } catch {
+    throw new Error(`Working directory does not exist: ${absolute}`)
+  }
+  if (!stat.isDirectory()) {
+    throw new Error(`Working directory is not a directory: ${absolute}`)
+  }
+  return fs.realpath(absolute)
+}
+
+function stripWrappingQuotes(value: string): string {
+  if (value.length >= 2) {
+    const first = value[0]
+    const last = value[value.length - 1]
+    if ((first === '"' && last === '"') || (first === "'" && last === "'")) {
+      return value.slice(1, -1).trim()
+    }
+  }
+  return value
 }
 
 function createTaskRecord(input: {

@@ -15,6 +15,7 @@ type Props = {
 }
 
 export default function CreateTaskModal({ onCreated, onCancel }: Props) {
+  const [taskName, setTaskName] = useState('')
   const [taskText, setTaskText] = useState('')
   const [workDir, setWorkDir] = useState('')
   const [workflows, setWorkflows] = useState<WorkflowFileSummary[]>([])
@@ -35,14 +36,15 @@ export default function CreateTaskModal({ onCreated, onCancel }: Props) {
   }, [])
 
   async function startTask() {
+    const name = taskName.trim()
     const task = taskText.trim()
-    if (!task || starting) return
+    if (!name || !task || starting) return
 
     setStarting(true)
     setError(null)
     try {
       const result = await api.orchestrator.startRun({
-        name: 'Coding',
+        name,
         task,
         workflowFilename: workflowFilename || undefined,
         workDir: workDir.trim() || undefined,
@@ -76,13 +78,20 @@ export default function CreateTaskModal({ onCreated, onCancel }: Props) {
               </option>
             ))}
           </select>
+          <label className={styles.label}>NAME</label>
+          <input
+            className={styles.input}
+            value={taskName}
+            onChange={event => setTaskName(event.target.value)}
+            placeholder="Short task name"
+            autoFocus
+          />
           <label className={styles.label}>TASK</label>
           <textarea
             className={styles.textarea}
             value={taskText}
             onChange={event => setTaskText(event.target.value)}
             placeholder="Describe what the agents should build or change."
-            autoFocus
           />
           <label className={styles.label}>WORK DIR</label>
           <input
@@ -95,7 +104,7 @@ export default function CreateTaskModal({ onCreated, onCancel }: Props) {
         </div>
         <div className={styles.footer}>
           <button className={styles.cancelBtn} onClick={onCancel} disabled={starting}>CANCEL</button>
-          <button className={styles.createBtn} onClick={startTask} disabled={!taskText.trim() || !workflowFilename || starting}>
+          <button className={styles.createBtn} onClick={startTask} disabled={!taskName.trim() || !taskText.trim() || !workflowFilename || starting}>
             {starting ? 'STARTING' : 'START'}
           </button>
         </div>

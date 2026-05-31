@@ -3,7 +3,7 @@ import path from 'node:path'
 
 import type { AgentCli, ReasoningEffort } from '../src/types.js'
 
-export const WORKFLOW_DIR = path.join(process.cwd(), '.covoila', 'workflows')
+export const WORKFLOW_DIR = path.join(process.cwd(), 'workflows')
 export const DEFAULT_WORKFLOW_PATH = path.join(WORKFLOW_DIR, 'multi-agents-coding-flow.yaml')
 
 export type WorkflowAgent = {
@@ -56,6 +56,8 @@ export type WorkflowFileSummary = {
   id: string
   name: string
 }
+
+const HUMAN_TARGET = 'HUMAN'
 
 export type LoadedWorkflowFile = WorkflowFileSummary & {
   yaml: string
@@ -441,7 +443,9 @@ function validateTransition(
 
   if (input.target !== undefined) {
     transition.target = assertString(input.target, `${pathName}.target`)
-    if (!agents[transition.target]) throw new Error(`Unknown target "${transition.target}" at ${pathName}`)
+    if (transition.target !== HUMAN_TARGET && !agents[transition.target]) {
+      throw new Error(`Unknown target "${transition.target}" at ${pathName}`)
+    }
   }
   if (input.prompt !== undefined) transition.prompt = assertString(input.prompt, `${pathName}.prompt`)
   if (input.requireArtifacts !== undefined) {

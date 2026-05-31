@@ -228,6 +228,51 @@
   font-size: 11px;
 }
 
+.screenTabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  max-width: 60%;
+  overflow-x: auto;
+}
+
+.screenTab {
+  height: 30px;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 9px;
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-terminal);
+  font-size: 11px;
+}
+
+.screenTab:hover,
+.screenTab:focus {
+  color: var(--text);
+  border-color: var(--amber-dim);
+  outline: none;
+}
+
+.screenTabActive {
+  color: var(--amber);
+  border-color: var(--amber-dim);
+  background: var(--bg-hover);
+}
+
+.screenTabLabel {
+  white-space: nowrap;
+}
+
+.screenTabMeta {
+  color: var(--text-dim);
+  font-size: 10px;
+}
+
 .statusRunning {
   color: var(--green);
 }

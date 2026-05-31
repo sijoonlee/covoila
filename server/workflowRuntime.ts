@@ -43,6 +43,9 @@ export type ApplyReportResult = {
   transition: WorkflowTransition
 }
 
+const HUMAN_TARGET = 'HUMAN'
+const NEEDS_USER_STATE = 'needs_user'
+
 export function createWorkflowRun(workflow: WorkflowDefinition): WorkflowRunState {
   const initialState = workflow.stateMachine.states[workflow.stateMachine.initial]
   if (!initialState) {
@@ -98,6 +101,27 @@ export async function applyWorkflowReport(
   }
   if (state.wait.from !== fromAgent) {
     throw new Error(`State ${run.currentState} is waiting for ${state.wait.from}, not ${fromAgent}`)
+  }
+
+  if (isHumanTalk(report)) {
+    validateReportArtifacts(report)
+    const transition: WorkflowTransition = {
+      verb: 'talk',
+      target: HUMAN_TARGET,
+      next: NEEDS_USER_STATE,
+    }
+    const nextState = getState(workflow, transition.next)
+    const nextRun: WorkflowRunState = {
+      ...run,
+      currentState: transition.next,
+      lastReport: report,
+      status: statusForState(nextState),
+    }
+    return {
+      run: nextRun,
+      dispatch: null,
+      transition,
+    }
   }
 
   const transition = findTransition(state, report)
@@ -170,6 +194,10 @@ function findTransition(state: WorkflowState, report: AgentReport): WorkflowTran
     throw new Error(`Report ${report.verb}${report.target ? `:${report.target}` : ''} is not allowed. Allowed: ${allowed}`)
   }
   return transition
+}
+
+function isHumanTalk(report: AgentReport): boolean {
+  return report.verb === 'talk' && report.target === HUMAN_TARGET
 }
 
 async function validateRequiredArtifacts(

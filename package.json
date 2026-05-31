@@ -7,8 +7,7 @@
     "dev": "concurrently \"vite\" \"tsx server/index.ts\"",
     "server": "tsx server/index.ts",
     "build": "tsc && vite build",
-    "preview": "vite preview",
-    "postinstall": "node scripts/fix-node-pty-spawn-helper.js"
+    "preview": "vite preview"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.23.0",

@@ -1,6 +1,7 @@
 import { type Dispatch, type SetStateAction, useCallback, useEffect, useState } from 'react'
 import type { AppView, Layout, TaskRecord, AgentConfig, AgentSessionSnapshot, TaskStatus } from './types'
 import { api } from './api'
+import { LAYOUT_SLOTS } from './mockData'
 import Header from './components/Header/Header'
 import TerminalGrid from './components/TerminalGrid/TerminalGrid'
 import CreateTaskModal from './components/CreateTaskModal/CreateTaskModal'
@@ -16,6 +17,8 @@ export default function App() {
   const [createTaskOpen, setCreateTaskOpen] = useState(false)
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
   const [taskRailCollapsed, setTaskRailCollapsed] = useState(false)
+  const [activeScreenIndex, setActiveScreenIndex] = useState(0)
+  const [dismissedHumanAttention, setDismissedHumanAttention] = useState<Set<string>>(() => new Set())
 
   const refreshTasks = useCallback(async () => {
     const next = await api.tasks.get()
@@ -77,6 +80,7 @@ export default function App() {
   function handleTaskCreated(task: TaskRecord, session?: AgentSessionSnapshot | null) {
     setCreateTaskOpen(false)
     setSelectedTaskId(task.id)
+    setActiveScreenIndex(0)
     setTasks(current => {
       const idx = current.findIndex(item => item.id === task.id)
       if (idx === -1) return [...current, task]
@@ -129,6 +133,43 @@ export default function App() {
     }
   }
 
+  const selectedTaskSessions = selectedTaskId
+    ? sessionsForTask(agentSessions, selectedTaskId)
+    : []
+  const selectedTask = selectedTaskId
+    ? tasks.find(task => task.id === selectedTaskId) ?? null
+    : null
+  const humanAttentionSessionIds = selectedTask
+    ? humanAttentionSessionsForTask(selectedTask)
+        .filter(sessionKey => !dismissedHumanAttention.has(sessionKey))
+        .map(sessionKey => sessionKey.split(':')[0])
+    : []
+  const humanAttentionSessionIdSet = new Set(humanAttentionSessionIds)
+  const screenSize = LAYOUT_SLOTS[layout]
+  const screenCount = selectedTaskId
+    ? Math.max(1, Math.ceil(selectedTaskSessions.length / screenSize))
+    : 1
+
+  useEffect(() => {
+    setActiveScreenIndex(current => Math.min(current, screenCount - 1))
+  }, [screenCount])
+
+  useEffect(() => {
+    setActiveScreenIndex(0)
+  }, [selectedTaskId])
+
+  function handleHumanAttentionCleared(sessionId: string) {
+    setDismissedHumanAttention(current => {
+      const next = new Set(current)
+      for (const key of humanAttentionSessionsForTasks(tasks)) {
+        if (key.startsWith(`${sessionId}:`)) {
+          next.add(key)
+        }
+      }
+      return next
+    })
+  }
+
   return (
     <div className={styles.app}>
       <Header
@@ -165,12 +206,23 @@ export default function App() {
                       : 'Task-free agent terminals'}
                   </div>
                 </div>
+                {selectedTaskId && screenCount > 1 && (
+                  <ScreenTabs
+                    sessions={selectedTaskSessions}
+                    screenSize={screenSize}
+                    activeScreenIndex={activeScreenIndex}
+                    onSelect={setActiveScreenIndex}
+                  />
+                )}
               </div>
               <TerminalGrid
                 layout={layout}
                 agentConfigs={agentConfigs}
                 sessions={agentSessions}
                 activeTaskId={selectedTaskId}
+                activeScreenIndex={activeScreenIndex}
+                attentionSessionIds={humanAttentionSessionIdSet}
+                onHumanAttentionCleared={handleHumanAttentionCleared}
                 onSessionStarted={handleSessionStarted}
                 onSessionTerminated={handleSessionTerminated}
               />
@@ -191,6 +243,73 @@ export default function App() {
 
 function taskSessionCount(sessions: AgentSessionSnapshot[], taskId: string): number {
   return sessions.filter(session => session.taskId === taskId && session.status !== 'exited' && session.status !== 'failed').length
+}
+
+function sessionsForTask(sessions: AgentSessionSnapshot[], taskId: string): AgentSessionSnapshot[] {
+  return sessions
+    .filter(session => session.taskId === taskId)
+    .slice()
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+}
+
+function humanAttentionSessionsForTasks(tasks: TaskRecord[]): string[] {
+  return tasks.flatMap(humanAttentionSessionsForTask)
+}
+
+function humanAttentionSessionsForTask(task: TaskRecord): string[] {
+  const run = task.memory.orchestratorRun as {
+    agentSessions?: Record<string, string>
+  } | undefined
+  if (!run?.agentSessions) return []
+
+  return Object.entries(task.agentSessions).flatMap(([agentName, state]) => {
+    if (!state.needsHumanAttention) return []
+    const sessionId = run.agentSessions?.[agentName]
+    if (!sessionId) return []
+    return [`${sessionId}:${state.humanAttentionAt ?? ''}`]
+  })
+}
+
+function ScreenTabs({
+  sessions,
+  screenSize,
+  activeScreenIndex,
+  onSelect,
+}: {
+  sessions: AgentSessionSnapshot[]
+  screenSize: number
+  activeScreenIndex: number
+  onSelect: (screenIndex: number) => void
+}) {
+  const screenCount = Math.ceil(sessions.length / screenSize)
+  return (
+    <div className={styles.screenTabs} role="tablist" aria-label="Terminal screens">
+      {Array.from({ length: screenCount }, (_, screenIndex) => {
+        const screenSessions = sessions.slice(screenIndex * screenSize, (screenIndex + 1) * screenSize)
+        const label = `Screen ${screenIndex + 1}`
+        const names = screenSessions.map(session => agentSessionLabel(session)).join(', ')
+        const activeCount = screenSessions.filter(session => session.status !== 'exited' && session.status !== 'failed').length
+        return (
+          <button
+            key={screenIndex}
+            type="button"
+            role="tab"
+            aria-selected={activeScreenIndex === screenIndex}
+            className={`${styles.screenTab} ${activeScreenIndex === screenIndex ? styles.screenTabActive : ''}`}
+            onClick={() => onSelect(screenIndex)}
+            title={names}
+          >
+            <span className={styles.screenTabLabel}>{label}</span>
+            <span className={styles.screenTabMeta}>{activeCount}/{screenSessions.length}</span>
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+function agentSessionLabel(session: AgentSessionSnapshot): string {
+  return session.agentInstanceId || session.title || session.id
 }
 
 function statusClass(status: TaskStatus): string {

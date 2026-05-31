@@ -38,6 +38,7 @@ type StartAgentSessionInput = {
   agentInstanceId?: string
   title?: string
   cwd: string
+  extraWritableDirs?: string[]
   config: AgentSessionConfig
   prompt: string
   mcpUrl?: string
@@ -60,6 +61,7 @@ type BuiltCommand = {
 function buildAgentCommand(
   config: AgentSessionConfig,
   cwd: string,
+  extraWritableDirs: string[] = [],
   mcpUrl?: string,
   reportToken?: string,
   reportTokenEnvVar?: string,
@@ -75,6 +77,9 @@ function buildAgentCommand(
       '--model',
       config.model,
     ]
+    for (const dir of extraWritableDirs) {
+      command.push('--add-dir', dir)
+    }
     if (mcpUrl && reportToken && reportTokenEnvVar) {
       env[reportTokenEnvVar] = reportToken
       command.push(
@@ -86,6 +91,9 @@ function buildAgentCommand(
   }
 
   const command = ['claude', '--model', config.model]
+  for (const dir of extraWritableDirs) {
+    command.push('--add-dir', dir)
+  }
   if (config.reasoningEffort) {
     command.push('--effort', config.reasoningEffort)
   }
@@ -111,7 +119,16 @@ function buildAgentCommand(
     command.push('--strict-mcp-config', '--mcp-config', JSON.stringify(mcpConfig))
     return {
       command,
-      displayCommand: ['claude', '--model', config.model, ...(config.reasoningEffort ? ['--effort', config.reasoningEffort] : []), '--strict-mcp-config', '--mcp-config', JSON.stringify(redactedConfig)],
+      displayCommand: [
+        'claude',
+        '--model',
+        config.model,
+        ...extraWritableDirs.flatMap(dir => ['--add-dir', dir]),
+        ...(config.reasoningEffort ? ['--effort', config.reasoningEffort] : []),
+        '--strict-mcp-config',
+        '--mcp-config',
+        JSON.stringify(redactedConfig),
+      ],
       env,
     }
   }
@@ -135,6 +152,7 @@ export class AgentSession {
     const builtCommand = buildAgentCommand(
       input.config,
       input.cwd,
+      input.extraWritableDirs,
       input.mcpUrl,
       input.reportToken,
       input.reportTokenEnvVar,
@@ -183,19 +201,26 @@ export class AgentSession {
     try {
       await access(this.snapshotData.cwd)
     } catch {
-      this.setStatus('failed')
       this.appendSystemLine(`Working directory does not exist: ${this.snapshotData.cwd}\n`)
+      this.setStatus('failed')
       return this.snapshot()
     }
 
     const [binary, ...args] = this.command
-    this.terminal = pty.spawn(binary, args, {
-      name: 'xterm-256color',
-      cols,
-      rows,
-      cwd: this.snapshotData.cwd,
-      env: { ...process.env, ...this.env, TERM: 'xterm-256color' },
-    })
+    try {
+      this.terminal = pty.spawn(binary, args, {
+        name: 'xterm-256color',
+        cols,
+        rows,
+        cwd: this.snapshotData.cwd,
+        env: { ...process.env, ...this.env, TERM: 'xterm-256color' },
+      })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown spawn error'
+      this.appendSystemLine(`Failed to start ${this.snapshotData.cli}: ${message}\n`)
+      this.setStatus('failed')
+      return this.snapshot()
+    }
 
     this.snapshotData.pid = this.terminal.pid
     this.setStatus('running')

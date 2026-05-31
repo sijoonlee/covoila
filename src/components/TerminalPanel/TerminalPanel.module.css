@@ -9,6 +9,22 @@
   min-width: 0;
 }
 
+.needsHumanAttention {
+  border-color: var(--red);
+  animation: humanAttentionPulse 1s ease-in-out infinite;
+}
+
+@keyframes humanAttentionPulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(224, 64, 64, 0.2);
+  }
+
+  50% {
+    box-shadow: 0 0 0 2px rgba(224, 64, 64, 0.9), 0 0 18px rgba(224, 64, 64, 0.45);
+  }
+}
+
 .spanRows {
   grid-row: 1 / -1;
 }
