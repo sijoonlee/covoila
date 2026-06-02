@@ -35,6 +35,20 @@ type RevisionRuleDraft = {
   instruction: string
 }
 
+type GateDraft = {
+  draftKey: string
+  id: string
+  afterPhaseId: string
+  type: 'command' | 'javascript'
+  cwd: 'workDir' | 'taskTmpDir'
+  command: string
+  script: string
+  revisePhaseId: string
+  targetAgentId: string
+  maxAttempts: number
+  instruction: string
+}
+
 type WorkflowFileSummary = {
   filename: string
   id: string
@@ -64,6 +78,23 @@ type ParsedWorkflowDefinition = {
           max?: number
           next: string
         }>
+      }
+      gate?: {
+        run: {
+          type: 'command' | 'javascript'
+          command?: string
+          script?: string
+          cwd?: 'workDir' | 'taskTmpDir'
+          timeoutMs?: number
+        }
+        onPass: {
+          next: string
+        }
+        onFail: {
+          next: string
+          prompt?: string
+          max?: number
+        }
       }
       final?: boolean
     }>
@@ -169,8 +200,12 @@ function normalizeLines(value: string): string[] {
 }
 
 function yamlScalar(value: string): string {
-  if (/^[A-Za-z0-9._/-]+$/.test(value)) return value
+  if (/^[A-Za-z0-9._/-]+$/.test(value) && !isYamlAmbiguousScalar(value)) return value
   return JSON.stringify(value)
+}
+
+function isYamlAmbiguousScalar(value: string): boolean {
+  return value === 'true' || value === 'false' || /^-?\d+(?:\.\d+)?$/.test(value)
 }
 
 function filenameForWorkflowId(workflowId: string): string {
@@ -207,12 +242,56 @@ function revisionCounterKey(rule: RevisionRuleDraft): string {
   return `revision_${rule.id}`
 }
 
+function gateStateId(gate: GateDraft): string {
+  return `gate-${gate.id}`
+}
+
+function gateRevisionStateId(gate: GateDraft): string {
+  return `revision-gate-${gate.id}`
+}
+
+function gatePromptKey(gate: GateDraft): string {
+  return `gate.${gate.id}.failure`
+}
+
+function gateCounterKey(gate: GateDraft): string {
+  return `gate_${gate.id}`
+}
+
+function gatesAfterPhase(gates: GateDraft[], phaseId: string): GateDraft[] {
+  return gates.filter(gate => gate.afterPhaseId === phaseId)
+}
+
+function firstStateAfterPhase(
+  phases: WorkflowPhaseDraft[],
+  gates: GateDraft[],
+  phase: WorkflowPhaseDraft,
+): string {
+  const phaseGates = gatesAfterPhase(gates, phase.id)
+  if (phaseGates.length > 0) return gateStateId(phaseGates[0])
+  const index = phaseIndex(phases, phase.id)
+  return phases[index + 1]?.id ?? 'done'
+}
+
+function gatePassNextState(
+  phases: WorkflowPhaseDraft[],
+  gates: GateDraft[],
+  gate: GateDraft,
+): string {
+  const phaseGates = gatesAfterPhase(gates, gate.afterPhaseId)
+  const gateIndex = phaseGates.findIndex(candidate => candidate.draftKey === gate.draftKey)
+  if (gateIndex >= 0 && phaseGates[gateIndex + 1]) return gateStateId(phaseGates[gateIndex + 1])
+  const phaseIndexValue = phaseIndex(phases, gate.afterPhaseId)
+  return phases[phaseIndexValue + 1]?.id ?? 'done'
+}
+
 function generateWorkflowYaml(
   workflowId: string,
   workflowName: string,
   agents: WorkflowAgentDraft[],
   phases: WorkflowPhaseDraft[],
   revisionRules: RevisionRuleDraft[],
+  gates: GateDraft[],
 ): string {
   const lines: string[] = [
     `id: ${yamlScalar(workflowId)}`,
@@ -252,7 +331,6 @@ function generateWorkflowYaml(
   )
 
   phases.forEach((phase, index) => {
-    const nextPhase = phases[index + 1]
     const phaseRevisionRules = revisionRules.filter(rule => rule.fromPhaseId === phase.id)
     lines.push(
       `    ${yamlScalar(phase.id)}:`,
@@ -269,7 +347,7 @@ function generateWorkflowYaml(
       }
     }
     lines.push(
-      `            next: ${yamlScalar(nextPhase?.id ?? 'done')}`,
+      `            next: ${yamlScalar(firstStateAfterPhase(phases, gates, phase))}`,
     )
     for (const rule of phaseRevisionRules) {
       lines.push(
@@ -289,6 +367,33 @@ function generateWorkflowYaml(
     )
   })
 
+  for (const gate of gates) {
+    lines.push(
+      `    ${yamlScalar(gateStateId(gate))}:`,
+      '      gate:',
+      '        run:',
+      `          type: ${gate.type}`,
+      `          cwd: ${gate.cwd}`,
+    )
+    if (gate.type === 'command') {
+      lines.push(`          command: ${yamlScalar(gate.command)}`)
+    } else {
+      lines.push('          script: |')
+      lines.push(blockScalar(gate.script, '            '))
+    }
+    lines.push(
+      '        onPass:',
+      `          next: ${yamlScalar(gatePassNextState(phases, gates, gate))}`,
+      '        onFail:',
+      `          next: ${yamlScalar(gateRevisionStateId(gate))}`,
+      `          prompt: ${yamlScalar(gatePromptKey(gate))}`,
+      `          increment: ${yamlScalar(gateCounterKey(gate))}`,
+      `          max: ${gate.maxAttempts}`,
+      '          exceeded: needs_user',
+      '',
+    )
+  }
+
   for (const rule of revisionRules) {
     const revisePhase = phases.find(phase => phase.id === rule.revisePhaseId)
     lines.push(
@@ -306,6 +411,29 @@ function generateWorkflowYaml(
     }
     lines.push(
       `            next: ${yamlScalar(rule.fromPhaseId)}`,
+      '          - verb: failed',
+      '            next: needs_user',
+      '',
+    )
+  }
+
+  for (const gate of gates) {
+    const revisePhase = phases.find(phase => phase.id === gate.revisePhaseId)
+    lines.push(
+      `    ${yamlScalar(gateRevisionStateId(gate))}:`,
+      '      wait:',
+      `        from: ${yamlScalar(gate.targetAgentId)}`,
+      '        on:',
+      '          - verb: done',
+    )
+    if (revisePhase && revisePhase.outputs.length > 0) {
+      lines.push('            requireArtifacts:')
+      for (const output of revisePhase.outputs) {
+        lines.push(`              - ${yamlScalar(artifactForRuntime(output))}`)
+      }
+    }
+    lines.push(
+      `            next: ${yamlScalar(gateStateId(gate))}`,
       '          - verb: failed',
       '            next: needs_user',
       '',
@@ -336,6 +464,12 @@ function generateWorkflowYaml(
   for (const rule of revisionRules) {
     lines.push(`  ${yamlScalar(revisionPromptKey(rule))}: |`)
     lines.push(blockScalar(renderRevisionPrompt(rule, phases), '    '))
+    lines.push('')
+  }
+
+  for (const gate of gates) {
+    lines.push(`  ${yamlScalar(gatePromptKey(gate))}: |`)
+    lines.push(blockScalar(renderGateRevisionPrompt(gate, phases), '    '))
     lines.push('')
   }
 
@@ -412,12 +546,46 @@ function renderRevisionPrompt(rule: RevisionRuleDraft, phases: WorkflowPhaseDraf
   ].join('\n')
 }
 
+function renderGateRevisionPrompt(gate: GateDraft, phases: WorkflowPhaseDraft[]): string {
+  const afterPhase = phases.find(phase => phase.id === gate.afterPhaseId)
+  const revisePhase = phases.find(phase => phase.id === gate.revisePhaseId)
+  const outputs = revisePhase && revisePhase.outputs.length > 0
+    ? revisePhase.outputs.map(output => `- ${output}`).join('\n')
+    : '- none'
+
+  return [
+    `You are revising the ${revisePhase?.name || gate.revisePhaseId} phase because the ${afterPhase?.name || gate.afterPhaseId} deterministic gate failed.`,
+    '',
+    '{sharedContext}',
+    '',
+    'Gate failure:',
+    '{lastGate.summary}',
+    '',
+    'Gate stdout:',
+    '{lastGate.stdout}',
+    '',
+    'Gate stderr:',
+    '{lastGate.stderr}',
+    '',
+    gate.instruction,
+    '',
+    'Revise these output artifacts as needed:',
+    outputs,
+    '',
+    'When revision is complete, report:',
+    '- { "verb": "done" }',
+    '- { "verb": "talk", "target": "HUMAN", "content": "Ask the user for the needed decision or missing information." }',
+    '- { "verb": "failed", "reason": "..." }',
+  ].join('\n')
+}
+
 function workflowToDraft(workflow: unknown): {
   workflowId: string
   workflowName: string
   agents: WorkflowAgentDraft[]
   phases: WorkflowPhaseDraft[]
   revisionRules: RevisionRuleDraft[]
+  gates: GateDraft[]
 } {
   const parsed = workflow as ParsedWorkflowDefinition
   const agents = Object.entries(parsed.agents).map(([id, agent]) => ({
@@ -431,6 +599,7 @@ function workflowToDraft(workflow: unknown): {
   }))
   const phases = extractPhases(parsed)
   const revisionRules = extractRevisionRules(parsed, phases)
+  const gates = extractGates(parsed, phases)
 
   return {
     workflowId: parsed.id,
@@ -438,6 +607,7 @@ function workflowToDraft(workflow: unknown): {
     agents,
     phases,
     revisionRules,
+    gates,
   }
 }
 
@@ -466,10 +636,22 @@ function extractPhases(workflow: ParsedWorkflowDefinition): WorkflowPhaseDraft[]
         .filter(uniqueString),
     })
 
-    stateId = doneTransition?.next ?? ''
+    stateId = resolveNextPhaseState(workflow, doneTransition?.next ?? '')
   }
 
   return phases
+}
+
+function resolveNextPhaseState(workflow: ParsedWorkflowDefinition, stateId: string): string {
+  let current = stateId
+  const seen = new Set<string>()
+  while (current && !seen.has(current)) {
+    seen.add(current)
+    const state = workflow.stateMachine.states[current]
+    if (!state?.gate) return current
+    current = state.gate.onPass.next
+  }
+  return current
 }
 
 function extractRevisionRules(
@@ -499,6 +681,43 @@ function extractRevisionRules(
   }
 
   return rules
+}
+
+function extractGates(
+  workflow: ParsedWorkflowDefinition,
+  phases: WorkflowPhaseDraft[],
+): GateDraft[] {
+  const gates: GateDraft[] = []
+  for (const phase of phases) {
+    const doneTransition = workflow.stateMachine.states[phase.id]?.wait?.on.find(transition => transition.verb === 'done')
+    let stateId = doneTransition?.next ?? ''
+    const seen = new Set<string>()
+    while (stateId && !seen.has(stateId)) {
+      seen.add(stateId)
+      const state = workflow.stateMachine.states[stateId]
+      if (!state?.gate) break
+      const gateId = stateId.replace(/^gate-/, '') || nextId('gate', gates)
+      const failState = workflow.stateMachine.states[state.gate.onFail.next]
+      const failAgent = failState?.wait?.from ?? phases.find(candidate => candidate.id === phase.id)?.agentId ?? ''
+      const prompt = state.gate.onFail.prompt ? workflow.prompts[state.gate.onFail.prompt] ?? '' : ''
+      gates.push({
+        draftKey: nextDraftKey('gate'),
+        id: gateId,
+        afterPhaseId: phase.id,
+        type: state.gate.run.type,
+        cwd: state.gate.run.cwd ?? 'workDir',
+        command: state.gate.run.command ?? '',
+        script: state.gate.run.script ?? '',
+        revisePhaseId: phase.id,
+        targetAgentId: failAgent,
+        maxAttempts: state.gate.onFail.max ?? 3,
+        instruction: extractPromptSection(prompt, '{lastGate.stderr}', 'Revise these output artifacts as needed:')
+          || 'Fix the issue found by the deterministic gate, then report done.',
+      })
+      stateId = state.gate.onPass.next
+    }
+  }
+  return gates
 }
 
 function extractPromptSection(prompt: string, startMarker: string, endMarker: string): string {
@@ -539,6 +758,7 @@ export default function WorkflowEditor() {
   const [agents, setAgents] = useState<WorkflowAgentDraft[]>(INITIAL_AGENTS)
   const [phases, setPhases] = useState<WorkflowPhaseDraft[]>(INITIAL_PHASES)
   const [revisionRules, setRevisionRules] = useState<RevisionRuleDraft[]>([])
+  const [gates, setGates] = useState<GateDraft[]>([])
   const [structureLocked, setStructureLocked] = useState(false)
   const [saving, setSaving] = useState(false)
   const [saveStatus, setSaveStatus] = useState<string | null>(null)
@@ -554,14 +774,25 @@ export default function WorkflowEditor() {
     Number.isFinite(rule.maxRevisions) &&
     rule.maxRevisions > 0,
   )
+  const gatesValid = gates.every(gate =>
+    phases.some(phase => phase.id === gate.afterPhaseId) &&
+    phases.some(phase => phase.id === gate.revisePhaseId) &&
+    agents.some(agent => agent.id === gate.targetAgentId) &&
+    Boolean(gate.id.trim()) &&
+    (gate.type === 'command' ? Boolean(gate.command.trim()) : Boolean(gate.script.trim())) &&
+    Number.isFinite(gate.maxAttempts) &&
+    gate.maxAttempts >= 0,
+  )
   const canSave = Boolean(workflowId.trim()) &&
     Boolean(workflowName.trim()) &&
     canLock &&
     uniqueValues(agents.map(agent => agent.id)) &&
     uniqueValues(phases.map(phase => phase.id)) &&
     uniqueValues(revisionRules.map(rule => rule.id)) &&
-    revisionPolicyValid
-  const structureIsLocked = structureLocked || revisionRules.length > 0
+    uniqueValues(gates.map(gate => gate.id)) &&
+    revisionPolicyValid &&
+    gatesValid
+  const structureIsLocked = structureLocked || revisionRules.length > 0 || gates.length > 0
 
   useEffect(() => {
     refreshWorkflowFiles().catch(console.error)
@@ -589,7 +820,8 @@ export default function WorkflowEditor() {
       setAgents(draft.agents)
       setPhases(draft.phases)
       setRevisionRules(draft.revisionRules)
-      setStructureLocked(draft.revisionRules.length > 0)
+      setGates(draft.gates)
+      setStructureLocked(draft.revisionRules.length > 0 || draft.gates.length > 0)
       setSaveStatus(`Loaded ${result.data.filename}`)
     } catch (error) {
       setSaveError(error instanceof Error ? error.message : 'Failed to load workflow')
@@ -608,6 +840,7 @@ export default function WorkflowEditor() {
     setAgents(current => current.map(agent => agent.draftKey === agentKey ? { ...agent, id: nextId } : agent))
     setPhases(current => current.map(phase => phase.agentId === previousId ? { ...phase, agentId: nextId } : phase))
     setRevisionRules(current => current.map(rule => rule.targetAgentId === previousId ? { ...rule, targetAgentId: nextId } : rule))
+    setGates(current => current.map(gate => gate.targetAgentId === previousId ? { ...gate, targetAgentId: nextId } : gate))
   }
 
   function updatePhase(phaseKey: string, patch: Partial<WorkflowPhaseDraft>): void {
@@ -621,6 +854,11 @@ export default function WorkflowEditor() {
       ...rule,
       fromPhaseId: rule.fromPhaseId === previousId ? nextId : rule.fromPhaseId,
       revisePhaseId: rule.revisePhaseId === previousId ? nextId : rule.revisePhaseId,
+    })))
+    setGates(current => current.map(gate => ({
+      ...gate,
+      afterPhaseId: gate.afterPhaseId === previousId ? nextId : gate.afterPhaseId,
+      revisePhaseId: gate.revisePhaseId === previousId ? nextId : gate.revisePhaseId,
     })))
   }
 
@@ -641,6 +879,7 @@ export default function WorkflowEditor() {
     if (structureIsLocked) return
     setAgents(current => current.filter(agent => agent.id !== agentId))
     setPhases(current => current.map(phase => phase.agentId === agentId ? { ...phase, agentId: '' } : phase))
+    setGates(current => current.map(gate => gate.targetAgentId === agentId ? { ...gate, targetAgentId: '' } : gate))
   }
 
   function addPhase(): void {
@@ -660,6 +899,7 @@ export default function WorkflowEditor() {
   function removePhase(phaseId: string): void {
     if (structureIsLocked) return
     setPhases(current => current.filter(phase => phase.id !== phaseId))
+    setGates(current => current.filter(gate => gate.afterPhaseId !== phaseId && gate.revisePhaseId !== phaseId))
   }
 
   function movePhase(phaseId: string, direction: -1 | 1): void {
@@ -702,6 +942,33 @@ export default function WorkflowEditor() {
     setRevisionRules([])
   }
 
+  function addGate(): void {
+    if (!structureLocked || phases.length === 0) return
+    const afterPhase = phases[Math.max(0, phases.length - 2)] ?? phases[0]
+    const revisePhase = afterPhase
+    setGates(current => [...current, {
+      draftKey: nextDraftKey('gate'),
+      id: nextId('gate', current),
+      afterPhaseId: afterPhase.id,
+      type: 'command',
+      cwd: 'workDir',
+      command: 'test -d tests',
+      script: 'return true',
+      revisePhaseId: revisePhase.id,
+      targetAgentId: revisePhase.agentId,
+      maxAttempts: 3,
+      instruction: 'Fix the issue found by the deterministic gate, then report done.',
+    }])
+  }
+
+  function updateGate(gateKey: string, patch: Partial<GateDraft>): void {
+    setGates(current => current.map(gate => gate.draftKey === gateKey ? { ...gate, ...patch } : gate))
+  }
+
+  function removeGate(gateId: string): void {
+    setGates(current => current.filter(gate => gate.id !== gateId))
+  }
+
   function resetWorkflow(): void {
     setWorkflowId('multi-agents-coding-flow')
     setWorkflowName('Multi-Agent Coding Workflow')
@@ -709,6 +976,7 @@ export default function WorkflowEditor() {
     setAgents(INITIAL_AGENTS)
     setPhases(INITIAL_PHASES)
     setRevisionRules([])
+    setGates([])
     setStructureLocked(false)
     setSaveStatus('Reset workflow draft')
     setSaveError(null)
@@ -721,7 +989,7 @@ export default function WorkflowEditor() {
     setSaveError(null)
     try {
       const filename = filenameForWorkflowId(workflowId)
-      const yaml = generateWorkflowYaml(workflowId.trim(), workflowName.trim(), agents, phases, revisionRules)
+      const yaml = generateWorkflowYaml(workflowId.trim(), workflowName.trim(), agents, phases, revisionRules, gates)
       await api.workflow.save(yaml, filename)
       await refreshWorkflowFiles()
       setSelectedWorkflowFilename(filename)
@@ -740,8 +1008,8 @@ export default function WorkflowEditor() {
           <div className={styles.title}>Workflow Editor</div>
           <div className={styles.meta}>
             {structureLocked
-              ? 'Agents and phases are structurally locked for revision policy design.'
-              : 'Define agents and a linear phase sequence before adding revision policy.'}
+              ? 'Agents and phases are structurally locked for gates and revision policy design.'
+              : 'Define agents and a linear phase sequence before adding gates and revision policy.'}
           </div>
         </div>
         <button
@@ -771,7 +1039,7 @@ export default function WorkflowEditor() {
       </div>
       {(saveStatus || saveError || !canSave) && (
         <div className={`${styles.saveStrip} ${saveError ? styles.saveError : ''}`}>
-          {saveError ?? saveStatus ?? 'Workflow needs a name, unique ids, valid phase agents, and valid revision rules before saving.'}
+          {saveError ?? saveStatus ?? 'Workflow needs a name, unique ids, valid phase agents, valid gates, and valid revision rules before saving.'}
         </div>
       )}
 
@@ -798,7 +1066,8 @@ export default function WorkflowEditor() {
       <div className={styles.stageRail}>
         <span className={styles.stageActive}>1 AGENTS</span>
         <span className={styles.stageActive}>2 PHASES</span>
-        <span className={structureLocked ? styles.stageNext : styles.stageDisabled}>3 REVISION POLICY</span>
+        <span className={structureLocked ? styles.stageNext : styles.stageDisabled}>3 GATES</span>
+        <span className={structureLocked ? styles.stageNext : styles.stageDisabled}>4 REVISION POLICY</span>
       </div>
 
       <div className={styles.content}>
@@ -965,6 +1234,142 @@ export default function WorkflowEditor() {
               </article>
             ))}
           </div>
+        </section>
+
+        <section className={`${styles.section} ${styles.revisionSection}`}>
+          <div className={styles.sectionHeader}>
+            <div>
+              <div className={styles.sectionTitle}>Deterministic Gates</div>
+              <div className={styles.sectionMeta}>
+                {structureLocked
+                  ? 'Run shell or JavaScript checks between phases before the next agent starts.'
+                  : 'Lock agents and phases before configuring deterministic checks.'}
+              </div>
+            </div>
+            <div className={styles.revisionActions}>
+              <button className={styles.addBtn} disabled={!structureLocked || phases.length === 0} onClick={addGate}>+ GATE</button>
+              <button className={styles.deleteBtn} disabled={gates.length === 0} onClick={() => setGates([])}>CLEAR</button>
+            </div>
+          </div>
+          {!structureLocked && (
+            <div className={styles.lockPreview}>
+              {phases.map((phase, index) => (
+                <span key={phase.draftKey}>{index + 1}. {phase.name || phase.id}</span>
+              ))}
+            </div>
+          )}
+          {structureLocked && (
+            <div className={styles.revisionList}>
+              {gates.length === 0 && (
+                <div className={styles.emptyPolicy}>No deterministic gates. Agents advance directly between phases.</div>
+              )}
+              {gates.map(gate => {
+                const afterIndex = phaseIndex(phases, gate.afterPhaseId)
+                const revisionCandidates = phases.filter((_, index) => index <= Math.max(0, afterIndex))
+                return (
+                  <article className={styles.revisionCard} key={gate.draftKey}>
+                    <div className={styles.cardHeader}>
+                      <input
+                        className={styles.idInput}
+                        value={gate.id}
+                        onChange={event => updateGate(gate.draftKey, { id: event.target.value.trim() })}
+                        aria-label="Gate id"
+                      />
+                      <button className={styles.deleteBtn} onClick={() => removeGate(gate.id)}>x</button>
+                    </div>
+                    <div className={styles.gateGrid}>
+                      <label className={styles.field}>
+                        <span>After phase</span>
+                        <select
+                          value={gate.afterPhaseId}
+                          onChange={event => {
+                            const afterPhaseId = event.target.value
+                            const revisePhase = phases.find(phase => phase.id === afterPhaseId) ?? phases[0]
+                            updateGate(gate.draftKey, {
+                              afterPhaseId,
+                              revisePhaseId: revisePhase.id,
+                              targetAgentId: revisePhase.agentId,
+                            })
+                          }}
+                        >
+                          {phases.map(phase => (
+                            <option value={phase.id} key={phase.id}>{phase.name || phase.id}</option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className={styles.field}>
+                        <span>Type</span>
+                        <select value={gate.type} onChange={event => updateGate(gate.draftKey, { type: event.target.value as GateDraft['type'] })}>
+                          <option value="command">Shell command</option>
+                          <option value="javascript">JavaScript</option>
+                        </select>
+                      </label>
+                      <label className={styles.field}>
+                        <span>Cwd</span>
+                        <select value={gate.cwd} onChange={event => updateGate(gate.draftKey, { cwd: event.target.value as GateDraft['cwd'] })}>
+                          <option value="workDir">Working directory</option>
+                          <option value="taskTmpDir">Artifact directory</option>
+                        </select>
+                      </label>
+                      <label className={styles.field}>
+                        <span>Max attempts</span>
+                        <input
+                          type="number"
+                          min="0"
+                          max="20"
+                          value={gate.maxAttempts}
+                          onChange={event => updateGate(gate.draftKey, {
+                            maxAttempts: Math.max(0, Number(event.target.value) || 0),
+                          })}
+                        />
+                      </label>
+                    </div>
+                    <label className={styles.field}>
+                      <span>{gate.type === 'command' ? 'Shell command' : 'JavaScript script'}</span>
+                      <textarea
+                        value={gate.type === 'command' ? gate.command : gate.script}
+                        onChange={event => updateGate(gate.draftKey, gate.type === 'command'
+                          ? { command: event.target.value }
+                          : { script: event.target.value })}
+                      />
+                    </label>
+                    <div className={styles.revisionGrid}>
+                      <label className={styles.field}>
+                        <span>Revise phase</span>
+                        <select
+                          value={gate.revisePhaseId}
+                          onChange={event => {
+                            const revisePhaseId = event.target.value
+                            const revisePhase = phases.find(phase => phase.id === revisePhaseId)
+                            updateGate(gate.draftKey, {
+                              revisePhaseId,
+                              targetAgentId: revisePhase?.agentId ?? gate.targetAgentId,
+                            })
+                          }}
+                        >
+                          {revisionCandidates.map(phase => (
+                            <option value={phase.id} key={phase.id}>{phase.name || phase.id}</option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className={styles.field}>
+                        <span>Send failure to</span>
+                        <select value={gate.targetAgentId} onChange={event => updateGate(gate.draftKey, { targetAgentId: event.target.value })}>
+                          {agents.map(agent => (
+                            <option value={agent.id} key={agent.id}>{agent.name || agent.id}</option>
+                          ))}
+                        </select>
+                      </label>
+                    </div>
+                    <label className={styles.field}>
+                      <span>Failure instruction</span>
+                      <textarea value={gate.instruction} onChange={event => updateGate(gate.draftKey, { instruction: event.target.value })} />
+                    </label>
+                  </article>
+                )
+              })}
+            </div>
+          )}
         </section>
 
         <section className={`${styles.section} ${styles.revisionSection}`}>

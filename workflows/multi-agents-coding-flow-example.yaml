@@ -21,7 +21,7 @@ agents:
     cli: codex
     model: gpt-5.4
     reasoningEffort: medium
-    role: "Your job is to discover unknowns in the given task and to improve the task by retrieving knowledge from code and by discussing with user. \n\\nYou DO NOT write implementation code."
+    role: "Your job is to discover unknowns in the given task and to improve the task by retrieving knowledge from code and by discussing with user. \\n\\\\nYou DO NOT write implementation code."
   code-reviewer:
     cli: codex
     model: gpt-5.4
@@ -52,7 +52,8 @@ stateMachine:
           - verb: done
             requireArtifacts:
               - claims.md
-            next: planning
+              - claims.md
+            next: gate-gate-1
           - verb: failed
             next: needs_user
 
@@ -63,6 +64,7 @@ stateMachine:
         on:
           - verb: done
             requireArtifacts:
+              - plan.md
               - plan.md
             next: plan-reviewing
           - verb: failed
@@ -119,12 +121,28 @@ stateMachine:
           - verb: failed
             next: needs_user
 
+    gate-gate-1:
+      gate:
+        run:
+          type: command
+          cwd: taskTmpDir
+          command: "test -f claims1.md || { echo \"claims1.md is missing\"; exit 1; }"
+        onPass:
+          next: planning
+        onFail:
+          next: revision-gate-gate-1
+          prompt: gate.gate-1.failure
+          increment: gate_gate-1
+          max: 1
+          exceeded: needs_user
+
     revision-revision-plan-from-plan-reviewing:
       wait:
         from: planner
         on:
           - verb: done
             requireArtifacts:
+              - plan.md
               - plan.md
             next: plan-reviewing
           - verb: failed
@@ -135,8 +153,6 @@ stateMachine:
         from: planner
         on:
           - verb: done
-            requireArtifacts:
-              - plan.md
             next: coding
           - verb: failed
             next: needs_user
@@ -150,6 +166,18 @@ stateMachine:
           - verb: failed
             next: needs_user
 
+    revision-gate-gate-1:
+      wait:
+        from: claim-analyzer
+        on:
+          - verb: done
+            requireArtifacts:
+              - claims.md
+              - claims.md
+            next: gate-gate-1
+          - verb: failed
+            next: needs_user
+
     done:
       final: true
       status: done
@@ -160,7 +188,7 @@ stateMachine:
 
 prompts:
   phase.claim-analysis: |
-    You are responsible for the Claim analysis phase.
+    You are responsible for the Claim Analysis phase.
     
     {sharedContext}
     
@@ -186,14 +214,15 @@ prompts:
     
     Output artifacts:
     - claims.md
+    - tmp/claims.md
     
     Allowed reports:
-    - { "verb": "done", "artifacts": ["claims.md"] }
+    - { "verb": "done", "artifacts": ["claims.md", "claims.md"] }
     - { "verb": "talk", "target": "HUMAN", "content": "Ask the user for the needed decision or missing information." }
     - { "verb": "failed", "reason": "..." }
 
   phase.planning: |
-    You are responsible for the planning phase.
+    You are responsible for the Planning phase.
     
     {sharedContext}
     
@@ -216,9 +245,10 @@ prompts:
     
     Output artifacts:
     - plan.md
+    - tmp/plan.md
     
     Allowed reports:
-    - { "verb": "done", "artifacts": ["plan.md"] }
+    - { "verb": "done", "artifacts": ["plan.md", "plan.md"] }
     - { "verb": "talk", "target": "HUMAN", "content": "Ask the user for the needed decision or missing information." }
     - { "verb": "failed", "reason": "..." }
 
@@ -240,7 +270,7 @@ prompts:
     
     Allowed reports:
     - { "verb": "done" }
-    - { "verb": "talk", "target": "planner", "content": "Explain the needed planning revision." }
+    - { "verb": "talk", "target": "planner", "content": "Explain the needed Planning revision." }
     - { "verb": "talk", "target": "HUMAN", "content": "Ask the user for the needed decision or missing information." }
     - { "verb": "failed", "reason": "..." }
 
@@ -262,7 +292,7 @@ prompts:
     
     Allowed reports:
     - { "verb": "done" }
-    - { "verb": "talk", "target": "planner", "content": "Explain the needed planning revision." }
+    - { "verb": "talk", "target": "planner", "content": "Explain the needed Plan Reviewing revision." }
     - { "verb": "talk", "target": "HUMAN", "content": "Ask the user for the needed decision or missing information." }
     - { "verb": "failed", "reason": "..." }
 
@@ -289,7 +319,7 @@ prompts:
     - { "verb": "failed", "reason": "..." }
 
   revision.revision-plan-from-plan-reviewing: |
-    You are revising the planning phase because Plan Reviewing requested changes.
+    You are revising the Planning phase because Plan Reviewing requested changes.
     
     {sharedContext}
     
@@ -300,6 +330,7 @@ prompts:
     
     Revise these output artifacts as needed:
     - plan.md
+    - tmp/plan.md
     
     When revision is complete, report:
     - { "verb": "done" }
@@ -307,7 +338,7 @@ prompts:
     - { "verb": "failed", "reason": "..." }
 
   revision.revision-plan-from-coding: |
-    You are revising the planning phase because Coding requested changes.
+    You are revising the Plan Reviewing phase because Coding requested changes.
     
     {sharedContext}
     
@@ -317,7 +348,7 @@ prompts:
     Revise the plan based on the request, then report done.
     
     Revise these output artifacts as needed:
-    - plan.md
+    - none
     
     When revision is complete, report:
     - { "verb": "done" }
@@ -341,3 +372,29 @@ prompts:
     - { "verb": "done" }
     - { "verb": "talk", "target": "HUMAN", "content": "Ask the user for the needed decision or missing information." }
     - { "verb": "failed", "reason": "..." }
+
+  gate.gate-1.failure: |
+    You are revising the Claim Analysis phase because the Claim Analysis deterministic gate failed.
+    
+    {sharedContext}
+    
+    Gate failure:
+    {lastGate.summary}
+    
+    Gate stdout:
+    {lastGate.stdout}
+    
+    Gate stderr:
+    {lastGate.stderr}
+    
+    Fix the issue found by the deterministic gate, then report done.
+    
+    Revise these output artifacts as needed:
+    - claims.md
+    - tmp/claims.md
+    
+    When revision is complete, report:
+    - { "verb": "done" }
+    - { "verb": "talk", "target": "HUMAN", "content": "Ask the user for the needed decision or missing information." }
+    - { "verb": "failed", "reason": "..." }
+

@@ -10,9 +10,9 @@ import {
   type ActionReportEvent,
 } from './report.js'
 import {
+  advanceWorkflow,
   applyWorkflowReport,
   createWorkflowRun,
-  getCurrentPromptDispatch,
   resolveTaskTmpDir,
   writeTaskFile,
   type AgentReport,
@@ -70,7 +70,9 @@ export class Orchestrator {
 
     await writeTaskFile(context, input.task)
 
-    const run = createWorkflowRun(workflow)
+    const initialRun = createWorkflowRun(workflow)
+    const advanced = await advanceWorkflow(workflow, initialRun, context)
+    const run = advanced.run
     const task = createTaskRecord({
       id: taskId,
       name: input.name,
@@ -88,8 +90,9 @@ export class Orchestrator {
         taskTmpDir,
       },
     })
+    await appendGateEvents(task.id, advanced.gateEvents)
 
-    const dispatch = getCurrentPromptDispatch(workflow, run, context)
+    const dispatch = advanced.dispatch
     let dispatched: { session: AgentSessionSnapshot; run: WorkflowRunState } | null = null
     try {
       dispatched = dispatch ? await this.dispatchPrompt(task, run, dispatch, workflow) : null
@@ -141,13 +144,14 @@ export class Orchestrator {
 
     const report = parseAgentReport(event.output)
     const result = await applyWorkflowReport(workflow, run, context, fromAgent, report)
+    const advanced = await advanceWorkflow(workflow, result.run, context, result.transition.prompt)
     const needsHumanAttention = report.verb === 'talk' && report.target === 'HUMAN'
     const nextTask = await updateTask(task.id, current => ({
       ...current,
-      status: taskStatusForRun(result.run),
+      status: taskStatusForRun(advanced.run),
       memory: {
         ...current.memory,
-        orchestratorRun: result.run,
+        orchestratorRun: advanced.run,
       },
       agentSessions: {
         ...current.agentSessions,
@@ -165,24 +169,25 @@ export class Orchestrator {
       payload: {
         fromAgent,
         report,
-        currentState: result.run.currentState,
-        status: result.run.status,
-        dispatch: result.dispatch ? {
-          agent: result.dispatch.agent,
-          promptId: result.dispatch.promptId,
-          state: result.dispatch.state,
+        currentState: advanced.run.currentState,
+        status: advanced.run.status,
+        dispatch: advanced.dispatch ? {
+          agent: advanced.dispatch.agent,
+          promptId: advanced.dispatch.promptId,
+          state: advanced.dispatch.state,
         } : null,
       },
     })
+    await appendGateEvents(task.id, advanced.gateEvents)
 
-    const dispatched = result.dispatch && nextTask
-      ? await this.dispatchPrompt(nextTask, result.run, result.dispatch, workflow)
+    const dispatched = advanced.dispatch && nextTask
+      ? await this.dispatchPrompt(nextTask, advanced.run, advanced.dispatch, workflow)
       : null
     const updatedTask = nextTask ? await getTask(nextTask.id) : null
-    const updatedRun = updatedTask ? readRun(updatedTask) ?? result.run : result.run
+    const updatedRun = updatedTask ? readRun(updatedTask) ?? advanced.run : advanced.run
 
     return updatedTask
-      ? { task: updatedTask, run: updatedRun, dispatch: result.dispatch, session: dispatched?.session ?? null }
+      ? { task: updatedTask, run: updatedRun, dispatch: advanced.dispatch, session: dispatched?.session ?? null }
       : null
   }
 
@@ -294,6 +299,23 @@ async function markTaskDispatchFailed(
     type: 'ORCHESTRATOR_DISPATCH_FAILED',
     payload: { error: message },
   })
+}
+
+async function appendGateEvents(
+  taskId: string,
+  gateEvents: Array<{
+    state: string
+    route: string
+    result: unknown
+  }>,
+): Promise<void> {
+  for (const event of gateEvents) {
+    await appendTaskEvent({
+      taskId,
+      type: 'ORCHESTRATOR_GATE_EVALUATED',
+      payload: event,
+    })
+  }
 }
 
 async function resolveWorkDir(raw: string): Promise<string> {

@@ -324,10 +324,15 @@
   background: var(--bg-terminal);
 }
 
-.revisionGrid {
+.revisionGrid,
+.gateGrid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 8px;
+}
+
+.gateGrid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
 .emptyPolicy {
@@ -368,7 +373,8 @@
   .workflowFields,
   .loadMenu,
   .phaseGrid,
-  .revisionGrid {
+  .revisionGrid,
+  .gateGrid {
     grid-template-columns: 1fr;
   }
 }

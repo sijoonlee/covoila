@@ -26,6 +26,28 @@ export type WorkflowTransition = {
   next: string
 }
 
+export type WorkflowGateRun = {
+  type: 'command' | 'javascript'
+  command?: string
+  script?: string
+  cwd?: 'workDir' | 'taskTmpDir'
+  timeoutMs?: number
+}
+
+export type WorkflowGateRoute = {
+  next: string
+  prompt?: string
+  increment?: string
+  max?: number
+  exceeded?: string
+}
+
+export type WorkflowGate = {
+  run: WorkflowGateRun
+  onPass: WorkflowGateRoute
+  onFail: WorkflowGateRoute
+}
+
 export type WorkflowWait = {
   from: string
   on: WorkflowTransition[]
@@ -34,6 +56,7 @@ export type WorkflowWait = {
 export type WorkflowState = {
   prompt?: string
   wait?: WorkflowWait
+  gate?: WorkflowGate
   final?: boolean
   status?: string
 }
@@ -409,10 +432,66 @@ function validateState(
   if (input.final !== undefined) state.final = assertBoolean(input.final, `${name}.final`)
   if (input.status !== undefined) state.status = assertString(input.status, `${name}.status`)
   if (input.wait !== undefined) state.wait = validateWait(input.wait, name, agents)
-  if (!state.final && !state.wait) {
-    throw new Error(`State ${name} must define wait or final`)
+  if (input.gate !== undefined) state.gate = validateGate(input.gate, name)
+  if (!state.final && !state.wait && !state.gate) {
+    throw new Error(`State ${name} must define wait, gate, or final`)
+  }
+  if ([state.final, state.wait, state.gate].filter(Boolean).length > 1) {
+    throw new Error(`State ${name} must define only one of wait, gate, or final`)
   }
   return state
+}
+
+function validateGate(value: unknown, stateName: string): WorkflowGate {
+  const input = assertRecord(value, `${stateName}.gate`)
+  return {
+    run: validateGateRun(input.run, `${stateName}.gate.run`),
+    onPass: validateGateRoute(input.onPass, `${stateName}.gate.onPass`),
+    onFail: validateGateRoute(input.onFail, `${stateName}.gate.onFail`),
+  }
+}
+
+function validateGateRun(value: unknown, pathName: string): WorkflowGateRun {
+  const input = assertRecord(value, pathName)
+  if (input.type !== 'command' && input.type !== 'javascript') {
+    throw new Error(`Expected command or javascript gate at ${pathName}.type`)
+  }
+  const run: WorkflowGateRun = { type: input.type }
+  if (input.cwd !== undefined) {
+    if (input.cwd !== 'workDir' && input.cwd !== 'taskTmpDir') {
+      throw new Error(`Expected workDir or taskTmpDir at ${pathName}.cwd`)
+    }
+    run.cwd = input.cwd
+  }
+  if (input.timeoutMs !== undefined) {
+    if (!Number.isFinite(input.timeoutMs) || (input.timeoutMs as number) <= 0) {
+      throw new Error(`Expected positive number at ${pathName}.timeoutMs`)
+    }
+    run.timeoutMs = input.timeoutMs as number
+  }
+  if (run.type === 'command') {
+    run.command = assertStringLike(input.command, `${pathName}.command`)
+  } else {
+    run.script = assertString(input.script, `${pathName}.script`)
+  }
+  return run
+}
+
+function validateGateRoute(value: unknown, pathName: string): WorkflowGateRoute {
+  const input = assertRecord(value, pathName)
+  const route: WorkflowGateRoute = {
+    next: assertString(input.next, `${pathName}.next`),
+  }
+  if (input.prompt !== undefined) route.prompt = assertString(input.prompt, `${pathName}.prompt`)
+  if (input.increment !== undefined) route.increment = assertString(input.increment, `${pathName}.increment`)
+  if (input.max !== undefined) {
+    if (!Number.isFinite(input.max) || (input.max as number) < 0) {
+      throw new Error(`Expected non-negative number at ${pathName}.max`)
+    }
+    route.max = input.max as number
+  }
+  if (input.exceeded !== undefined) route.exceeded = assertString(input.exceeded, `${pathName}.exceeded`)
+  return route
 }
 
 function validateWait(
@@ -454,7 +533,9 @@ function validateTransition(
   }
   if (input.increment !== undefined) transition.increment = assertString(input.increment, `${pathName}.increment`)
   if (input.max !== undefined) {
-    if (!Number.isFinite(input.max)) throw new Error(`Expected number at ${pathName}.max`)
+    if (!Number.isFinite(input.max) || (input.max as number) < 0) {
+      throw new Error(`Expected non-negative number at ${pathName}.max`)
+    }
     transition.max = input.max as number
   }
   if (input.exceeded !== undefined) transition.exceeded = assertString(input.exceeded, `${pathName}.exceeded`)
@@ -479,6 +560,12 @@ function validateStateReferences(states: Record<string, WorkflowState>, initial:
         throw new Error(`State ${stateName} references missing exceeded state ${transition.exceeded}`)
       }
     }
+    for (const route of state.gate ? [state.gate.onPass, state.gate.onFail] : []) {
+      if (!states[route.next]) throw new Error(`State ${stateName} references missing next state ${route.next}`)
+      if (route.exceeded && !states[route.exceeded]) {
+        throw new Error(`State ${stateName} references missing exceeded state ${route.exceeded}`)
+      }
+    }
   }
 }
 
@@ -490,6 +577,11 @@ function validatePromptReferences(states: Record<string, WorkflowState>, prompts
     for (const transition of state.wait?.on ?? []) {
       if (transition.prompt && !prompts[transition.prompt]) {
         throw new Error(`State ${stateName} transition references missing prompt ${transition.prompt}`)
+      }
+    }
+    for (const route of state.gate ? [state.gate.onPass, state.gate.onFail] : []) {
+      if (route.prompt && !prompts[route.prompt]) {
+        throw new Error(`State ${stateName} gate route references missing prompt ${route.prompt}`)
       }
     }
   }
@@ -507,6 +599,12 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function assertString(value: unknown, pathName: string): string {
   if (typeof value !== 'string') throw new Error(`Expected string at ${pathName}`)
   return value
+}
+
+function assertStringLike(value: unknown, pathName: string): string {
+  if (typeof value === 'string') return value
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value)
+  throw new Error(`Expected string at ${pathName}`)
 }
 
 function assertBoolean(value: unknown, pathName: string): boolean {

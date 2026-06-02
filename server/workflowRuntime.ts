@@ -1,11 +1,19 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
+import { exec } from 'node:child_process'
+import { promisify } from 'node:util'
+import { createRequire } from 'node:module'
 import type {
+  WorkflowGateRoute,
+  WorkflowGateRun,
   ReportVerb,
   WorkflowDefinition,
   WorkflowState,
   WorkflowTransition,
 } from './workflowParser.js'
+
+const execAsync = promisify(exec)
+const gateRequireBase = createRequire(import.meta.url)
 
 export type AgentReport = {
   verb: ReportVerb
@@ -22,6 +30,7 @@ export type WorkflowRunState = {
   counters: Record<string, number>
   agentSessions: Record<string, string>
   lastReport?: AgentReport
+  lastGate?: WorkflowGateResult
   status: 'running' | 'done' | 'failed' | 'needs_user'
 }
 
@@ -43,8 +52,32 @@ export type ApplyReportResult = {
   transition: WorkflowTransition
 }
 
+export type WorkflowGateResult = {
+  state: string
+  type: 'command' | 'javascript'
+  passed: boolean
+  summary: string
+  stdout: string
+  stderr: string
+  exitCode?: number | null
+}
+
+export type WorkflowGateEvent = {
+  state: string
+  route: 'onPass' | 'onFail'
+  result: WorkflowGateResult
+}
+
+export type AdvanceWorkflowResult = {
+  run: WorkflowRunState
+  dispatch: PromptDispatch | null
+  gateEvents: WorkflowGateEvent[]
+}
+
 const HUMAN_TARGET = 'HUMAN'
 const NEEDS_USER_STATE = 'needs_user'
+const DEFAULT_GATE_TIMEOUT_MS = 30_000
+const MAX_AUTOMATIC_GATES = 25
 
 export function createWorkflowRun(workflow: WorkflowDefinition): WorkflowRunState {
   const initialState = workflow.stateMachine.states[workflow.stateMachine.initial]
@@ -83,6 +116,42 @@ export function getCurrentPromptDispatch(
     prompt: renderPrompt(workflow, run, context, promptTemplate),
     state: run.currentState,
   }
+}
+
+export async function advanceWorkflow(
+  workflow: WorkflowDefinition,
+  run: WorkflowRunState,
+  context: WorkflowTaskContext,
+  promptIdOverride?: string,
+): Promise<AdvanceWorkflowResult> {
+  let currentRun = run
+  let nextPromptId = promptIdOverride
+  const gateEvents: WorkflowGateEvent[] = []
+
+  for (let index = 0; index < MAX_AUTOMATIC_GATES; index += 1) {
+    const state = getState(workflow, currentRun.currentState)
+    if (!state.gate) {
+      return {
+        run: currentRun,
+        dispatch: getCurrentPromptDispatch(workflow, currentRun, context, nextPromptId),
+        gateEvents,
+      }
+    }
+
+    const gateResult = await executeGateRun(state.gate.run, state, currentRun, context)
+    const routeName = gateResult.passed ? 'onPass' : 'onFail'
+    const route = state.gate[routeName]
+    const routed = applyGateRoute(workflow, currentRun, route, gateResult)
+    currentRun = routed.run
+    nextPromptId = route.prompt
+    gateEvents.push({
+      state: gateResult.state,
+      route: routeName,
+      result: gateResult,
+    })
+  }
+
+  throw new Error(`Workflow exceeded automatic gate limit (${MAX_AUTOMATIC_GATES})`)
 }
 
 export async function applyWorkflowReport(
@@ -159,9 +228,155 @@ export async function applyWorkflowReport(
 
   return {
     run: nextRun,
-    dispatch: getCurrentPromptDispatch(workflow, nextRun, context, transition.prompt),
+    dispatch: null,
     transition,
   }
+}
+
+async function executeGateRun(
+  run: WorkflowGateRun,
+  state: WorkflowState,
+  workflowRun: WorkflowRunState,
+  context: WorkflowTaskContext,
+): Promise<WorkflowGateResult> {
+  const cwd = resolveGateCwd(run, context)
+  const timeout = run.timeoutMs ?? DEFAULT_GATE_TIMEOUT_MS
+  if (run.type === 'command') {
+    return executeCommandGate(run.command ?? '', cwd, timeout, workflowRun.currentState)
+  }
+  return executeJavaScriptGate(run.script ?? '', cwd, timeout, workflowRun.currentState, context, state)
+}
+
+async function executeCommandGate(
+  command: string,
+  cwd: string,
+  timeoutMs: number,
+  state: string,
+): Promise<WorkflowGateResult> {
+  try {
+    const output = await execAsync(command, {
+      cwd,
+      timeout: timeoutMs,
+      maxBuffer: 128 * 1024,
+    })
+    return {
+      state,
+      type: 'command',
+      passed: true,
+      summary: `Command gate passed: ${command}`,
+      stdout: output.stdout,
+      stderr: output.stderr,
+      exitCode: 0,
+    }
+  } catch (error) {
+    const execError = error as { stdout?: string; stderr?: string; code?: number | null; signal?: string }
+    return {
+      state,
+      type: 'command',
+      passed: false,
+      summary: execError.signal === 'SIGTERM'
+        ? `Command gate timed out after ${timeoutMs}ms: ${command}`
+        : `Command gate failed: ${command}`,
+      stdout: execError.stdout ?? '',
+      stderr: execError.stderr ?? '',
+      exitCode: execError.code ?? null,
+    }
+  }
+}
+
+async function executeJavaScriptGate(
+  script: string,
+  cwd: string,
+  timeoutMs: number,
+  state: string,
+  context: WorkflowTaskContext,
+  workflowState: WorkflowState,
+): Promise<WorkflowGateResult> {
+  const logs: string[] = []
+  const gateRequire = (name: string) => {
+    if (name === 'fs' || name === 'node:fs') return gateRequireBase('node:fs')
+    if (name === 'path' || name === 'node:path') return gateRequireBase('node:path')
+    throw new Error(`Module is not allowed in gate script: ${name}`)
+  }
+  const gateContext = {
+    workDir: context.workDir,
+    taskTmpDir: resolveTaskTmpDir(context),
+    cwd,
+    state: workflowState,
+  }
+  try {
+    const fn = new Function('context', 'require', 'console', script)
+    const result = await withTimeout(
+      Promise.resolve(fn(gateContext, gateRequire, {
+        log: (...values: unknown[]) => logs.push(values.map(String).join(' ')),
+      })),
+      timeoutMs,
+    )
+    const passed = Boolean(result)
+    return {
+      state,
+      type: 'javascript',
+      passed,
+      summary: passed ? 'JavaScript gate passed' : 'JavaScript gate returned a falsey value',
+      stdout: logs.join('\n'),
+      stderr: '',
+    }
+  } catch (error) {
+    return {
+      state,
+      type: 'javascript',
+      passed: false,
+      summary: error instanceof Error ? `JavaScript gate failed: ${error.message}` : 'JavaScript gate failed',
+      stdout: logs.join('\n'),
+      stderr: error instanceof Error ? error.stack ?? error.message : String(error),
+    }
+  }
+}
+
+function applyGateRoute(
+  workflow: WorkflowDefinition,
+  run: WorkflowRunState,
+  route: WorkflowGateRoute,
+  gateResult: WorkflowGateResult,
+): { run: WorkflowRunState } {
+  const nextCounters = { ...run.counters }
+  let nextStateId = route.next
+  if (route.increment) {
+    nextCounters[route.increment] = (nextCounters[route.increment] ?? 0) + 1
+    if (route.max !== undefined && nextCounters[route.increment] > route.max) {
+      nextStateId = route.exceeded ?? NEEDS_USER_STATE
+    }
+  }
+  const nextState = getState(workflow, nextStateId)
+  return {
+    run: {
+      ...run,
+      currentState: nextStateId,
+      counters: nextCounters,
+      lastGate: gateResult,
+      status: statusForState(nextState),
+    },
+  }
+}
+
+function resolveGateCwd(run: WorkflowGateRun, context: WorkflowTaskContext): string {
+  return run.cwd === 'taskTmpDir' ? resolveTaskTmpDir(context) : context.workDir
+}
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`Timed out after ${timeoutMs}ms`)), timeoutMs)
+    promise.then(
+      value => {
+        clearTimeout(timer)
+        resolve(value)
+      },
+      error => {
+        clearTimeout(timer)
+        reject(error)
+      },
+    )
+  })
 }
 
 export async function writeTaskFile(
@@ -247,6 +462,9 @@ function renderPrompt(
     'lastReport.content': run.lastReport?.content ?? '',
     'lastReport.reason': run.lastReport?.reason ?? '',
     'lastReport.artifacts': (run.lastReport?.artifacts ?? []).join(', '),
+    'lastGate.summary': run.lastGate?.summary ?? '',
+    'lastGate.stdout': run.lastGate?.stdout ?? '',
+    'lastGate.stderr': run.lastGate?.stderr ?? '',
   })
 }
 
