@@ -4,27 +4,27 @@ name: "Multi-Agent Coding Workflow Example"
 agents:
   planner:
     cli: codex
-    model: gpt-5.4
+    model: gpt-5.5
     reasoningEffort: medium
     role: "write a concrete implementation plan."
   plan-reviewer:
     cli: codex
-    model: gpt-5.4
+    model: gpt-5.5
     reasoningEffort: medium
     role: "Reviews plan against the task"
   coder:
     cli: codex
-    model: gpt-5.4
+    model: gpt-5.5
     reasoningEffort: medium
     role: "Changes the working project according to the approved plan."
   claim-analyzer:
     cli: codex
-    model: gpt-5.4
+    model: gpt-5.5
     reasoningEffort: medium
-    role: "Your job is to discover unknowns in the given task and to improve the task by retrieving knowledge from code and by discussing with user. \\n\\\\nYou DO NOT write implementation code."
+    role: "Your job is to discover unknowns in the given task and to improve the task by retrieving knowledge from code and by discussing with user. \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\n\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\nYou DO NOT write implementation code."
   code-reviewer:
     cli: codex
-    model: gpt-5.4
+    model: gpt-5.5
     reasoningEffort: medium
     role: "Review code based upon task and plan"
 
@@ -52,7 +52,6 @@ stateMachine:
           - verb: done
             requireArtifacts:
               - claims.md
-              - claims.md
             next: gate-gate-1
           - verb: failed
             next: needs_user
@@ -64,7 +63,6 @@ stateMachine:
         on:
           - verb: done
             requireArtifacts:
-              - plan.md
               - plan.md
             next: plan-reviewing
           - verb: failed
@@ -126,7 +124,7 @@ stateMachine:
         run:
           type: command
           cwd: taskTmpDir
-          command: "test -f claims1.md || { echo \"claims1.md is missing\"; exit 1; }"
+          command: "test -f claims.md || { echo \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\"claims.md is missing\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\"; exit 1; }"
         onPass:
           next: planning
         onFail:
@@ -142,7 +140,6 @@ stateMachine:
         on:
           - verb: done
             requireArtifacts:
-              - plan.md
               - plan.md
             next: plan-reviewing
           - verb: failed
@@ -172,7 +169,6 @@ stateMachine:
         on:
           - verb: done
             requireArtifacts:
-              - claims.md
               - claims.md
             next: gate-gate-1
           - verb: failed
@@ -214,10 +210,9 @@ prompts:
     
     Output artifacts:
     - claims.md
-    - tmp/claims.md
     
     Allowed reports:
-    - { "verb": "done", "artifacts": ["claims.md", "claims.md"] }
+    - { "verb": "done", "artifacts": ["claims.md"] }
     - { "verb": "talk", "target": "HUMAN", "content": "Ask the user for the needed decision or missing information." }
     - { "verb": "failed", "reason": "..." }
 
@@ -245,10 +240,9 @@ prompts:
     
     Output artifacts:
     - plan.md
-    - tmp/plan.md
     
     Allowed reports:
-    - { "verb": "done", "artifacts": ["plan.md", "plan.md"] }
+    - { "verb": "done", "artifacts": ["plan.md"] }
     - { "verb": "talk", "target": "HUMAN", "content": "Ask the user for the needed decision or missing information." }
     - { "verb": "failed", "reason": "..." }
 
@@ -330,7 +324,6 @@ prompts:
     
     Revise these output artifacts as needed:
     - plan.md
-    - tmp/plan.md
     
     When revision is complete, report:
     - { "verb": "done" }
@@ -391,7 +384,6 @@ prompts:
     
     Revise these output artifacts as needed:
     - claims.md
-    - tmp/claims.md
     
     When revision is complete, report:
     - { "verb": "done" }

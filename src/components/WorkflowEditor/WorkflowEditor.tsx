@@ -148,7 +148,7 @@ const INITIAL_PHASES: WorkflowPhaseDraft[] = [
     agentId: 'planner',
     prompt: 'Read task.md and write a concrete implementation plan.',
     inputs: ['task.md'],
-    outputs: ['tmp/plan.md'],
+    outputs: ['plan.md'],
   },
   {
     draftKey: nextDraftKey('phase'),
@@ -156,8 +156,8 @@ const INITIAL_PHASES: WorkflowPhaseDraft[] = [
     name: 'Plan Reviewing',
     description: 'Review the plan before coding starts.',
     agentId: 'reviewer',
-    prompt: 'Review tmp/plan.md against task.md. Approve it or explain what needs revision.',
-    inputs: ['task.md', 'tmp/plan.md'],
+    prompt: 'Review plan.md against task.md. Approve it or explain what needs revision.',
+    inputs: ['task.md', 'plan.md'],
     outputs: [],
   },
   {
@@ -166,8 +166,8 @@ const INITIAL_PHASES: WorkflowPhaseDraft[] = [
     name: 'Coding',
     description: 'Implement the approved plan in the working directory.',
     agentId: 'coder',
-    prompt: 'Read task.md and tmp/plan.md, then implement the requested changes.',
-    inputs: ['task.md', 'tmp/plan.md'],
+    prompt: 'Read task.md and plan.md, then implement the requested changes.',
+    inputs: ['task.md', 'plan.md'],
     outputs: [],
   },
   {
@@ -176,8 +176,8 @@ const INITIAL_PHASES: WorkflowPhaseDraft[] = [
     name: 'Code Reviewing',
     description: 'Review the code changes against the task and plan.',
     agentId: 'reviewer',
-    prompt: 'Review the working tree against task.md and tmp/plan.md.',
-    inputs: ['task.md', 'tmp/plan.md'],
+    prompt: 'Review the working tree against task.md and plan.md.',
+    inputs: ['task.md', 'plan.md'],
     outputs: [],
   },
 ]
@@ -632,7 +632,7 @@ function extractPhases(workflow: ParsedWorkflowDefinition): WorkflowPhaseDraft[]
       prompt: extractPromptSection(prompt, 'Phase prompt:', 'Input artifacts:') || prompt,
       inputs: extractArtifactSection(prompt, 'Input artifacts:', 'Output artifacts:'),
       outputs: extractArtifactSection(prompt, 'Output artifacts:', 'Allowed reports:')
-        .concat((doneTransition?.requireArtifacts ?? []).map(artifact => `tmp/${artifact}`))
+        .concat((doneTransition?.requireArtifacts ?? []))
         .filter(uniqueString),
     })
 
