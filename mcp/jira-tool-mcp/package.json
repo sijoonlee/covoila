@@ -1,0 +1,23 @@
+{
+  "name": "jira-tool-mcp",
+  "version": "0.1.0",
+  "description": "CLI and MCP server for Jira Cloud ticket operations",
+  "type": "module",
+  "bin": {
+    "jira-tool-mcp": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx src/index.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.23.0",
+    "zod": "^4.1.13"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.0",
+    "tsx": "^4.22.3",
+    "typescript": "^5.6.2"
+  }
+}
