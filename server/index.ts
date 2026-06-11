@@ -34,6 +34,7 @@ import {
   type WorkflowDefinition,
 } from './workflowParser.js'
 import { Orchestrator } from './orchestrator.js'
+import { appendWorkflowJsonlSessionOutput } from './workflowJsonlLog.js'
 
 const app = express()
 const httpServer = createServer(app)
@@ -438,6 +439,10 @@ const unsubscribeSessionUpdates = agentSessions.onSessionUpdated((session) => {
   }
 })
 
+const unsubscribeJsonlOutput = agentSessions.onOutput((event) => {
+  appendWorkflowJsonlSessionOutput(event).catch(console.error)
+})
+
 await ensureDir()
 await initTaskDatabase()
 const initialWorkflow = await loadInitialWorkflowFile()
@@ -460,6 +465,7 @@ for (const name of RESOURCES) {
 function shutdown() {
   unsubscribeTaskUpdates()
   unsubscribeSessionUpdates()
+  unsubscribeJsonlOutput()
   agentSessions.closeAll()
   terminalWss.close()
   taskEventsWss.close()

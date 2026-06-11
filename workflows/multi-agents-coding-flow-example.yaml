@@ -27,6 +27,11 @@ agents:
     model: gpt-5.5
     reasoningEffort: medium
     role: "Review code based upon task and plan"
+  learner:
+    cli: codex
+    model: gpt-5.5
+    reasoningEffort: medium
+    role: "Extract reusable learnings from the completed task."
 
 limits:
   maxConversationTurns: 8
@@ -108,7 +113,7 @@ stateMachine:
         from: code-reviewer
         on:
           - verb: done
-            next: done
+            next: learning
           - verb: talk
             target: coder
             prompt: revision.revision-code-from-code-review
@@ -116,6 +121,18 @@ stateMachine:
             max: 3
             exceeded: needs_user
             next: revision-revision-code-from-code-review
+          - verb: failed
+            next: needs_user
+
+    learning:
+      prompt: phase.learning
+      wait:
+        from: learner
+        on:
+          - verb: done
+            requireArtifacts:
+              - learning.md
+            next: done
           - verb: failed
             next: needs_user
 
@@ -312,6 +329,44 @@ prompts:
     - { "verb": "talk", "target": "HUMAN", "content": "Ask the user for the needed decision or missing information." }
     - { "verb": "failed", "reason": "..." }
 
+  phase.learning: |
+    You are responsible for the Learning phase.
+    
+    {sharedContext}
+    
+    Capture only token-saving knowledge from the completed task.
+    
+    Phase prompt:
+    Read events.jsonl as the primary and sufficient source for this experiment. Write a lean learning.md containing only shortcuts that would reduce future agent token usage in this project.
+    
+    Requirements:
+    1. Include a learning only if it would have helped an agent use fewer tokens on a future task by:
+      - revealing a hidden dependency or non-obvious coupling,
+      - pointing to the canonical file/path/API to inspect first,
+      - warning about a naming trap, duplicate-looking files, generated artifact, or misleading search result,
+      - documenting a concrete failed/revised path so future agents can avoid it,
+      - identifying a file or command that was discovered late after repeated investigation and would have explained behavior earlier.
+    2. Exclude task-specific implementation facts, completed-task summaries, obvious facts from task.md, successful happy-path steps, and statements that no revision/human clarification occurred.
+    3. Prefer no learning over weak learning. If no item passes the token-saving bar, write exactly:
+      # Learning
+      
+      No reusable token-saving learnings were found.
+    4. Each bullet must start with the shortcut/landmine, then cite the evidence source from events.jsonl or an artifact logged there.
+    5. Pay special attention to revision steps, report events with verb=talk, repeated coding messages, failed gates, user clarifications, prompts, reports, and artifact content logged in events.jsonl.
+    6. Look for late-discovered explanatory files: if events show repeated debugging/searching about a behavior and a relevant file appears only later, record the earlier inspection shortcut. For example, if Jest behavior was investigated for many steps before discovering a file such as jest.test.js that contains mock setup, write the shortcut as "When debugging Jest behavior, inspect jest.test.js early because it contains mock setup."
+    7. Look for search-path improvements: if an agent tried broad or misleading searches before finding the useful file/command, record the narrower search or canonical path that would have found it faster.
+    
+    Input artifacts:
+    - events.jsonl
+    
+    Output artifacts:
+    - learning.md
+    
+    Allowed reports:
+    - { "verb": "done", "artifacts": ["learning.md"] }
+    - { "verb": "talk", "target": "HUMAN", "content": "Ask the user for the needed decision or missing information." }
+    - { "verb": "failed", "reason": "..." }
+
   revision.revision-plan-from-plan-reviewing: |
     You are revising the Planning phase because Plan Reviewing requested changes.
     
@@ -389,4 +444,3 @@ prompts:
     - { "verb": "done" }
     - { "verb": "talk", "target": "HUMAN", "content": "Ask the user for the needed decision or missing information." }
     - { "verb": "failed", "reason": "..." }
-

@@ -7,6 +7,7 @@ import {
   generateReportToken,
   registerReportSession,
   tokenEnvVarForSession,
+  updateReportSessionContext,
   type ActionReportEvent,
 } from './report.js'
 import {
@@ -21,6 +22,10 @@ import {
   type WorkflowTaskContext,
 } from './workflowRuntime.js'
 import type { WorkflowDefinition } from './workflowParser.js'
+import {
+  appendWorkflowJsonlEvent,
+  setWorkflowJsonlSessionContext,
+} from './workflowJsonlLog.js'
 import { CONFIG_DIR } from './storage.js'
 import type { TaskRecord } from '../src/types.js'
 
@@ -68,7 +73,7 @@ export class Orchestrator {
       taskTmpDir,
     }
 
-    await writeTaskFile(context, input.task)
+    const taskFilePath = await writeTaskFile(context, input.task)
 
     const initialRun = createWorkflowRun(workflow)
     const advanced = await advanceWorkflow(workflow, initialRun, context)
@@ -81,6 +86,34 @@ export class Orchestrator {
       workflow,
     })
     await createTask(task)
+    await appendWorkflowJsonlEvent(resolveTaskTmpDir(context), {
+      runId: taskId,
+      taskId,
+      step: run.currentState,
+      who: 'orchestrator',
+      kind: 'run',
+      message: `Started workflow run ${input.name}`,
+      data: {
+        workflowId: workflow.id,
+        initialState: run.currentState,
+        workDir,
+        taskTmpDir,
+        task: input.task,
+      },
+    })
+    await appendWorkflowJsonlEvent(resolveTaskTmpDir(context), {
+      runId: taskId,
+      taskId,
+      step: run.currentState,
+      who: 'orchestrator',
+      kind: 'artifact',
+      message: 'task.md',
+      data: {
+        path: 'task.md',
+        absolutePath: taskFilePath,
+        content: await fs.readFile(taskFilePath, 'utf-8'),
+      },
+    })
     await appendTaskEvent({
       taskId,
       type: 'ORCHESTRATOR_RUN_STARTED',
@@ -90,14 +123,15 @@ export class Orchestrator {
         taskTmpDir,
       },
     })
-    await appendGateEvents(task.id, advanced.gateEvents)
+    await appendGateEvents(task, context, advanced.gateEvents)
+    await appendRunFinishedIfFinal(task, context, run)
 
     const dispatch = advanced.dispatch
     let dispatched: { session: AgentSessionSnapshot; run: WorkflowRunState } | null = null
     try {
       dispatched = dispatch ? await this.dispatchPrompt(task, run, dispatch, workflow) : null
     } catch (error) {
-      await markTaskDispatchFailed(task.id, run, error)
+      await markTaskDispatchFailed(task, run, error)
       throw error
     }
     const updatedTask = await getTask(taskId)
@@ -143,7 +177,31 @@ export class Orchestrator {
     }
 
     const report = parseAgentReport(event.output)
+    await appendWorkflowJsonlEvent(resolveTaskTmpDir(context), {
+      runId: task.id,
+      taskId: task.id,
+      step: run.currentState,
+      who: fromAgent,
+      kind: 'report',
+      message: summarizeReport(report),
+      data: {
+        sessionId: event.sessionId,
+        nodeId: event.nodeId,
+        nodeRunId: event.nodeRunId,
+        report,
+        rawOutput: event.output,
+      },
+    })
+    await appendReportedArtifacts(task, context, fromAgent, run.currentState, report)
+
     const result = await applyWorkflowReport(workflow, run, context, fromAgent, report)
+    await appendArtifacts(
+      task,
+      context,
+      fromAgent,
+      run.currentState,
+      (result.transition.requireArtifacts ?? []).filter(artifact => !(report.artifacts ?? []).includes(artifact)),
+    )
     const advanced = await advanceWorkflow(workflow, result.run, context, result.transition.prompt)
     const needsHumanAttention = report.verb === 'talk' && report.target === 'HUMAN'
     const nextTask = await updateTask(task.id, current => ({
@@ -163,6 +221,28 @@ export class Orchestrator {
       },
     }))
 
+    await appendWorkflowJsonlEvent(resolveTaskTmpDir(context), {
+      runId: task.id,
+      taskId: task.id,
+      step: run.currentState,
+      who: 'orchestrator',
+      kind: 'transition',
+      message: `${run.currentState} -> ${advanced.run.currentState}`,
+      data: {
+        from: run.currentState,
+        to: advanced.run.currentState,
+        fromAgent,
+        verb: report.verb,
+        target: report.target,
+        status: advanced.run.status,
+        transition: result.transition,
+        dispatch: advanced.dispatch ? {
+          agent: advanced.dispatch.agent,
+          promptId: advanced.dispatch.promptId,
+          state: advanced.dispatch.state,
+        } : null,
+      },
+    })
     await appendTaskEvent({
       taskId: task.id,
       type: 'ORCHESTRATOR_TRANSITIONED',
@@ -178,7 +258,8 @@ export class Orchestrator {
         } : null,
       },
     })
-    await appendGateEvents(task.id, advanced.gateEvents)
+    await appendGateEvents(task, context, advanced.gateEvents)
+    await appendRunFinishedIfFinal(task, context, advanced.run)
 
     const dispatched = advanced.dispatch && nextTask
       ? await this.dispatchPrompt(nextTask, advanced.run, advanced.dispatch, workflow)
@@ -197,9 +278,38 @@ export class Orchestrator {
     dispatch: PromptDispatch,
     workflow: WorkflowDefinition,
   ): Promise<{ session: AgentSessionSnapshot; run: WorkflowRunState }> {
+    const taskTmpDir = resolveTaskTmpDir(contextFromTask(task))
+    await appendWorkflowJsonlEvent(taskTmpDir, {
+      runId: task.id,
+      taskId: task.id,
+      step: dispatch.state,
+      who: 'orchestrator',
+      kind: 'prompt',
+      message: `Dispatched ${dispatch.promptId} to ${dispatch.agent}`,
+      data: {
+        agent: dispatch.agent,
+        promptId: dispatch.promptId,
+        prompt: dispatch.prompt,
+      },
+    })
+
     const existingSessionId = run.agentSessions[dispatch.agent]
     const existingSession = existingSessionId ? this.agentSessions.get(existingSessionId) : null
     if (existingSession && existingSession.status !== 'exited' && existingSession.status !== 'failed') {
+      setWorkflowJsonlSessionContext(existingSession.id, {
+        runId: task.id,
+        taskId: task.id,
+        taskTmpDir,
+        step: dispatch.state,
+        who: dispatch.agent,
+      })
+      updateReportSessionContext({
+        sessionId: existingSession.id,
+        task,
+        title: `${task.name}: ${dispatch.state}`,
+        nodeId: dispatch.state,
+        nodeRunId: dispatch.promptId,
+      })
       if (existingSession.pid) {
         if (!this.agentSessions.submitPrompt(existingSession.id, dispatch.prompt)) {
           throw new Error(`Agent session is not accepting prompts: ${existingSession.id}`)
@@ -220,6 +330,13 @@ export class Orchestrator {
     const sessionId = `session_${randomToken()}`
     const rawToken = generateReportToken()
     const tokenEnvVar = tokenEnvVarForSession(sessionId)
+    setWorkflowJsonlSessionContext(sessionId, {
+      runId: task.id,
+      taskId: task.id,
+      taskTmpDir,
+      step: dispatch.state,
+      who: dispatch.agent,
+    })
 
     registerReportSession({
       sessionId,
@@ -277,7 +394,7 @@ export class Orchestrator {
 }
 
 async function markTaskDispatchFailed(
-  taskId: string,
+  task: TaskRecord,
   run: WorkflowRunState,
   error: unknown,
 ): Promise<void> {
@@ -286,7 +403,7 @@ async function markTaskDispatchFailed(
     ...run,
     status: 'failed',
   }
-  await updateTask(taskId, current => ({
+  await updateTask(task.id, current => ({
     ...current,
     status: 'FAILED',
     memory: {
@@ -294,28 +411,159 @@ async function markTaskDispatchFailed(
       orchestratorRun: failedRun,
     },
   }))
+  await appendWorkflowJsonlEvent(resolveTaskTmpDir(contextFromTask(task)), {
+    runId: task.id,
+    taskId: task.id,
+    step: run.currentState,
+    who: 'orchestrator',
+    kind: 'error',
+    message,
+  })
   await appendTaskEvent({
-    taskId,
+    taskId: task.id,
     type: 'ORCHESTRATOR_DISPATCH_FAILED',
     payload: { error: message },
   })
 }
 
 async function appendGateEvents(
-  taskId: string,
+  task: TaskRecord,
+  context: WorkflowTaskContext,
   gateEvents: Array<{
     state: string
     route: string
-    result: unknown
+    result: {
+      passed?: boolean
+      summary?: string
+      stdout?: string
+      stderr?: string
+    }
   }>,
 ): Promise<void> {
   for (const event of gateEvents) {
+    await appendWorkflowJsonlEvent(resolveTaskTmpDir(context), {
+      runId: task.id,
+      taskId: task.id,
+      step: event.state,
+      who: 'orchestrator',
+      kind: 'gate',
+      message: event.result.summary ?? `Gate ${event.route}`,
+      data: event,
+    })
     await appendTaskEvent({
-      taskId,
+      taskId: task.id,
       type: 'ORCHESTRATOR_GATE_EVALUATED',
       payload: event,
     })
   }
+}
+
+async function appendRunFinishedIfFinal(
+  task: TaskRecord,
+  context: WorkflowTaskContext,
+  run: WorkflowRunState,
+): Promise<void> {
+  if (run.status === 'running') return
+
+  await appendWorkflowJsonlEvent(resolveTaskTmpDir(context), {
+    runId: task.id,
+    taskId: task.id,
+    step: run.currentState,
+    who: 'orchestrator',
+    kind: 'run',
+    message: `Workflow run finished with status ${run.status}`,
+    data: {
+      status: run.status,
+      currentState: run.currentState,
+    },
+  })
+}
+
+async function appendReportedArtifacts(
+  task: TaskRecord,
+  context: WorkflowTaskContext,
+  who: string,
+  step: string,
+  report: AgentReport,
+): Promise<void> {
+  await appendArtifacts(task, context, who, step, report.artifacts ?? [])
+}
+
+async function appendArtifacts(
+  task: TaskRecord,
+  context: WorkflowTaskContext,
+  who: string,
+  step: string,
+  artifacts: string[],
+): Promise<void> {
+  const seen = new Set<string>()
+  for (const artifact of artifacts) {
+    if (seen.has(artifact)) continue
+    seen.add(artifact)
+    const artifactPath = safeArtifactPath(resolveTaskTmpDir(context), artifact)
+    if (!artifactPath) {
+      await appendWorkflowJsonlEvent(resolveTaskTmpDir(context), {
+        runId: task.id,
+        taskId: task.id,
+        step,
+        who,
+        kind: 'artifact',
+        message: artifact,
+        data: {
+          path: artifact,
+          error: 'Invalid artifact path',
+        },
+      })
+      continue
+    }
+
+    try {
+      const content = await fs.readFile(artifactPath, 'utf-8')
+      await appendWorkflowJsonlEvent(resolveTaskTmpDir(context), {
+        runId: task.id,
+        taskId: task.id,
+        step,
+        who,
+        kind: 'artifact',
+        message: artifact,
+        data: {
+          path: artifact,
+          absolutePath: artifactPath,
+          content,
+        },
+      })
+    } catch (error) {
+      await appendWorkflowJsonlEvent(resolveTaskTmpDir(context), {
+        runId: task.id,
+        taskId: task.id,
+        step,
+        who,
+        kind: 'artifact',
+        message: artifact,
+        data: {
+          path: artifact,
+          absolutePath: artifactPath,
+          error: error instanceof Error ? error.message : String(error),
+        },
+      })
+    }
+  }
+}
+
+function safeArtifactPath(taskTmpDir: string, artifact: string): string | null {
+  if (!artifact || path.isAbsolute(artifact) || artifact.split(/[\\/]/).includes('..')) return null
+  return path.join(taskTmpDir, artifact)
+}
+
+function summarizeReport(report: AgentReport): string {
+  if (report.verb === 'talk') {
+    const target = report.target ? ` to ${report.target}` : ''
+    return `talk${target}: ${report.content ?? ''}`.trim()
+  }
+  if (report.verb === 'failed') {
+    return `failed: ${report.reason ?? report.content ?? ''}`.trim()
+  }
+  return report.verb
 }
 
 async function resolveWorkDir(raw: string): Promise<string> {
