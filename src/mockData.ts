@@ -17,15 +17,16 @@ export const LAYOUT_SLOTS: Record<Layout, number> = {
 };
 
 export const mockAgentConfigs: AgentConfig[] = [
+  { id: 'claude-fable',  cli: 'claude', model: 'claude-fable-5',    reasoningEffort: 'high' },
   { id: 'claude-sonnet', cli: 'claude', model: 'claude-sonnet-4-6', reasoningEffort: 'medium' },
-  { id: 'claude-opus',   cli: 'claude', model: 'claude-opus-4-7',   reasoningEffort: 'high' },
+  { id: 'claude-opus',   cli: 'claude', model: 'claude-opus-4-8',   reasoningEffort: 'high' },
   { id: 'codex-high',    cli: 'codex',  model: 'gpt-5.4',           reasoningEffort: 'high' },
   { id: 'codex-review',  cli: 'codex',  model: 'gpt-5.5',           reasoningEffort: 'high' },
 ];
 
 export const MODEL_OPTIONS: Record<AgentCli, string[]> = {
-  claude: ['claude-opus-4-7', 'claude-sonnet-4-6', 'claude-haiku-4-5'],
-  codex:  ['gpt-5.5', 'gpt-5.4', 'gpt-5.4-mini', 'gpt-5.3-codex'],
+  claude: ['claude-fable-5', 'claude-opus-4-8', 'claude-sonnet-4-6', 'claude-haiku-4-5'],
+  codex:  ['gpt-5.5', 'gpt-5.4', 'gpt-5.4-mini'],
 };
 
 export const REASONING_EFFORTS: ReasoningEffort[] = ['low', 'medium', 'high', 'xhigh'];
